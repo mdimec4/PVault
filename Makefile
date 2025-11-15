@@ -1,0 +1,12 @@
+CC = gcc
+CFLAGS = -std=c99 -Wall -O2 -municode -mwindows
+LIBS = -lws2_32 -lshlwapi -lcomctl32 -lgdi32 -ladvapi32 -luxtheme -ldwmapi -lsodium -lzip -lcomctl32
+TARGET = MyEncryptedNotes.exe
+SRC = main.c core.c mdlinkedlist.c modern_ui.c resources.o
+
+all:
+	windres resources.rc -O coff -o resources.o
+	$(CC) $(CFLAGS) $(SRC) -o $(TARGET) $(LIBS)
+
+clean:
+	rm -f $(TARGET) *.o
