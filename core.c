@@ -365,8 +365,8 @@ NoteData* GetNoteData(long long int id)
     nd->url = GetDecryptedBlob(pStmt, 4);
     nd->password = GetDecryptedBlob(pStmt, 5);
     nd->otherSecret = GetDecryptedBlob(pStmt, 6);
-    nd->created = sqlite3_column_int(pStmt, 7);
-    nd->modified = sqlite3_column_int(pStmt, 8);
+    nd->created = sqlite3_column_int64(pStmt, 7);
+    nd->modified = sqlite3_column_int64(pStmt, 8);
     
     sqlite3_finalize(pStmt);
     return nd;
