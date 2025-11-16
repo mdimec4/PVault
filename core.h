@@ -2,6 +2,25 @@
 #define CORE_H
 
 #include <stddef.h> // for size_t
+#include <time.h>
+#include "mdlinkedlist.h"
+
+typedef struct NoteEntry {
+    long long int id;
+    char* name;
+} NoteEntry;
+
+typedef struct NoteData {
+    long long int id;
+    char* name;
+    char* userName;
+    char* email;
+    char* url; 
+    char* password;
+    char* otherSecret;
+    time_t created;
+    time_t modified;
+} NoteData;
 
 #ifndef MAX
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
@@ -23,14 +42,20 @@ int IsPasswordIsSetSplitPath(const char* checkDirPath, const char* checkFileName
 int IsPasswordIsSet(const char* checkFilePath);
 
 // Initialization / cleanup
-int Init(void);
+int Init(const char* dataDir);
+void Destroy(void);
 void Logout(void);
+
+void NotesEntry_Free(void* data);
+md_linked_list_el* LoadNotesList(const char* filter);
+
+NoteData* NoteData_New(long long int id, const char* name, const char* userName, const char* email, const char* url, const char* password, const char* otherSecret, time_t created, time_t modified);
+void NoteData_Free(void* data);
+NoteData* GetNoteData(long long int id);
 
 char* NotesNameToFileName(const char* notesName);
 char* FileNameToNotesName(const char* fileName);
 
-char* MakeSecureNotesZipFilename(void);
-int ExportToZip(const char* sourceDir, const char* targetZipFilePath, const char* checkFileName);
-int ImportFromZip(const char* targetDir, const char* sourceZipFilePath);
+char* MakeJsonExportFilename(void);
 int WipeAndResetStorage(const char* sourceDir, const char* checkFileName);
 #endif // CORE_H

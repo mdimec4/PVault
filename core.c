@@ -17,19 +17,30 @@
 #define F_OK 0
 #define access _access
 #define mkdir _mkdir
+#define strdup _strdup
 #else
 #include <arpa/inet.h> // for htonl/ntohl on non-windows (if ever)
 #endif
 
 #include <sys/stat.h>
 #include <sodium.h> // libsodium
-#include <zip.h>
+#include <sqlite3.h>
+
+#include "core.h"
 
 #ifndef MAX_PATH
 #define MAX_PATH 260
 #endif
 
-static unsigned char xchacha_key[crypto_aead_xchacha20poly1305_ietf_KEYBYTES] = {0};; // 32-byte key
+static unsigned char* DecryptBuffer(const unsigned char* in_buf,
+                                    size_t in_len,
+                                    size_t* out_len);
+static unsigned char* EncryptBuffer(const unsigned char* plaintext,
+                                    size_t plain_len,
+                                    size_t* out_len);
+
+static unsigned char xchacha_key[crypto_aead_xchacha20poly1305_ietf_KEYBYTES] = {0}; // 32-byte key
+sqlite3* DB = NULL;
 
 
 // Verifier file format (vault file) - versioned
@@ -48,9 +59,46 @@ static const size_t SALT_LEN_DEFAULT = 16;
 static const uint64_t OPSLIMIT_DEFAULT = 3;              // Argon2 ops (time) - tune as desired
 static const uint64_t MEMLIMIT_DEFAULT = 64ULL * 1024 * 1024; // 64 MiB
 
-int Init(void)
+int Init(const char* dataDir)
 {
+    char* dbPath = JoinPath(dataDir, "SecureStorage.db");
+    
+    int exit = sqlite3_open(dbPath, &DB);
+    free(dbPath);
+    if (exit != SQLITE_OK) {
+        fprintf(stderr, "Failed to create/load database: %s\n", sqlite3_errmsg(DB));
+        return -1;
+    }
+    
+    const char* createSql = "CREATE TABLE IF NOT EXISTS SECRECTS ("
+    "ID INT PRIMARY KEY     NOT NULL,"
+    "NAME   TEXT            NOT NULL,"
+    "USERNAME BLOB,"
+    "EMAIL BLOB,"
+    "URL BLOB,"
+    "PASSWORD BLOB,"
+    "OTHER_SECRET BLOB,"
+    "CREATED INT NOT NULL,"
+    "MODIFIED INT);";
+    
+    char* messaggeError;
+    exit = sqlite3_exec(DB, createSql, NULL, 0, &messaggeError);
+    if (exit != SQLITE_OK) {
+        fprintf(stderr, "Error Create Table: %s\n", messaggeError);
+        sqlite3_free(messaggeError);
+        return -1;
+    }
+    
     return sodium_init();
+}
+
+void Destroy(void)
+{
+    Logout();
+    if (DB) {
+        sqlite3_close(DB);
+        DB = NULL;
+    }
 }
 
 // Utility: combine path (Windows PathCombineA). Returns newly allocated string or NULL.
@@ -74,6 +122,391 @@ char* JoinPath(const char* saveDirPath, const char* fileName) {
     if (!ret_buff) return NULL;
     memcpy(ret_buff, buffer_1, result_len);
     return ret_buff;
+}
+
+void NotesEntry_Free(void* data)
+{
+    if (!data)
+        return;
+    NoteEntry* ne = (NoteEntry*)data;
+    sodium_memzero(ne->name, strlen(ne->name));
+    free(ne->name);
+    sodium_memzero(ne, sizeof(NoteEntry));
+    free(data);
+}
+
+static char* GetDecryptedBlob(sqlite3_stmt *stmt, int col)
+{
+    int size = 0;
+    void* data = NULL;
+    
+    size = sqlite3_column_bytes(stmt, col);
+    data = sqlite3_column_blob(stmt, col);
+    
+    size_t sz;
+    return DecryptBuffer(data, size, &sz);
+}
+
+static int SetEncryptedBlob(sqlite3_stmt *stmt, int col, const char* value)
+{
+    if (!stmt || !value)
+        return -1;
+        
+    size_t blobLen;
+    unsigned char* blob = EncryptBuffer(value, strlen(value), &blobLen);
+    if (!blob)
+        return -1;
+    int exit = sqlite3_bind_blob(stmt, col, blob, blobLen, free);
+    if (exit != SQLITE_OK)
+    {
+        fprintf(stderr, "Failed to bind blob: %s\n", sqlite3_errmsg(DB));
+        return -1;
+    }
+    return 0;
+}
+
+md_linked_list_el* LoadNotesList(const char* filter)
+{
+    if (!DB)
+        return NULL;
+    char* parameter = NULL;
+    
+    char* query = "SELECT ID, NAME FROM SECRECTS ORDER BY MODIFIED DESC;";
+    if (filter) {
+        size_t newSize = strlen(filter) + 2 + 1;
+        parameter = calloc(newSize, 1);
+        snprintf(parameter, newSize - 1, "%%%s%%");
+        query = "SELECT ID, NAME FROM SECRECTS WHERE NAME LIKE ? ORDER BY ID DESC;";
+    }
+    
+    sqlite3_stmt *pStmt;
+    char* pzTail;
+    int exit = sqlite3_prepare_v2(DB, query, strlen(query), &pStmt, &pzTail);
+    if (exit != SQLITE_OK)
+    {
+        if (parameter)
+            free(parameter);
+        
+        fprintf(stderr, "Failed to prepare statment: %s\n", sqlite3_errmsg(DB));
+        return NULL;
+    }
+    exit = sqlite3_bind_text(pStmt, 1, parameter, strlen(parameter), free);
+    if (exit != SQLITE_OK)
+    {
+        fprintf(stderr, "Failed to bind to prepared statment: %s\n", sqlite3_errmsg(DB));
+        return NULL;
+    }
+    
+    int exitStep;
+    md_linked_list_el* result = NULL;
+    for (exitStep = sqlite3_step(pStmt); exitStep == SQLITE_ROW || exitStep == SQLITE_BUSY; exitStep = sqlite3_step(pStmt))
+    {
+        NoteEntry* ne = calloc(1, sizeof(NoteEntry));
+        ne->id = sqlite3_column_int64(pStmt, 0);
+        ne->name = strdup(sqlite3_value_text(pStmt, 1));
+        
+        result = md_linked_list_add(result, ne);
+    }
+    if (exitStep == SQLITE_ERROR)
+    {
+        fprintf(stderr, "Failed to step trough results: %s\n", sqlite3_errmsg(DB));
+        sqlite3_finalize(pStmt);
+        return result;
+    }
+    else if (exitStep == SQLITE_MISUSE)
+    {
+        fprintf(stderr, "Misuse\n");
+        sqlite3_finalize(pStmt);
+        return result;
+    }
+    
+    exit = sqlite3_finalize(pStmt);
+    if (exit != SQLITE_OK)
+    {
+        fprintf(stderr, "Failed to finaize prepared statment: %s\n", sqlite3_errmsg(DB));
+        return result;
+    }
+    return result;
+}
+
+NoteData* NoteData_New(long long int id, const char* name, const char* userName, const char* email, const char* url, const char* password, const char* otherSecret, time_t created, time_t modified)
+{
+    NoteData* nd = calloc(1, sizeof(NoteData));
+    if (!nd)
+        return NULL;
+    nd->id = id;
+    nd->name = strdup(name);
+    nd->userName = strdup(userName);
+    nd->email = strdup(email);
+    nd->url = strdup(url);
+    nd->password = strdup(password);
+    nd->otherSecret = strdup(otherSecret);
+    nd->created = created;
+    nd->modified = modified;
+    return nd;
+}
+
+void NoteData_Free(void* data)
+{
+    if (!data)
+        return;
+    NoteData* nd = (NoteData*)data;
+    sodium_memzero(nd->name, strlen(nd->name));
+    sodium_memzero(nd->userName, strlen(nd->userName));
+    sodium_memzero(nd->email, strlen(nd->email));
+    sodium_memzero(nd->url, strlen(nd->url));
+    sodium_memzero(nd->password, strlen(nd->password));
+    sodium_memzero(nd->otherSecret, strlen(nd->otherSecret));
+    free(nd->name);
+    free(nd->userName);
+    free(nd->email);
+    free(nd->url);
+    free(nd->password);
+    free(nd->otherSecret);
+    sodium_memzero(nd, sizeof(NoteData));
+    free(data);
+}
+
+static int MyStrcmp(const char* s1, const char* s2)
+{
+    if (s1 == s2)
+        return 0;
+    if (s1 && !s2)
+        return -1;
+    if (!s1 && s2)
+        return -1;
+        
+  size_t l1 = strlen(s1);
+  size_t l2 = strlen(s2);
+  if (l1 != l2)
+      return -1;
+ return strncmp(s1, s2, MIN(l1, l2));     
+}
+
+static int NoteData_Compare(NoteData* n1, NoteData* n2)
+{
+    if (n1 == n2)
+        return 0;
+    if (n1 && !n2)
+        return -1;
+    if (!n1 && n2)
+        return -1;
+        
+    if (n1->id != n2->id)
+        return -1;
+    if (MyStrcmp(n1->name, n2->name) != 0)
+        return -1;
+    if (MyStrcmp(n1->userName, n2->userName) != 0)
+        return -1;
+    if (MyStrcmp(n1->email, n2->email) != 0)
+        return -1;
+    if (MyStrcmp(n1->url, n2->url) != 0)
+        return -1;
+    if (MyStrcmp(n1->password, n2->password) != 0)
+        return -1;
+    if (MyStrcmp(n1->otherSecret, n2->otherSecret) != 0)
+        return -1
+    return 0;
+}
+
+NoteData* GetNoteData(long long int id)
+{
+    if (!DB)
+        return NULL;
+    if (id == -1LL)
+        return NULL;
+        
+    char* query = "SELECT ID, NAME USERNAME, EMAIL, URL, PASSWORD, OTHER_SECRET, CREATED, MODIFIED FROM SECRECTS WHERE ID = ?;";
+    
+    sqlite3_stmt *pStmt;
+    char* pzTail;
+    int exit = sqlite3_prepare_v2(DB, query, strlen(query), &pStmt, &pzTail);
+    if (exit != SQLITE_OK)
+    {        
+        fprintf(stderr, "Failed to prepare statment: %s\n", sqlite3_errmsg(DB));
+        return NULL;
+    }
+    
+    exit = sqlite3_bind_int64(pStmt, 1, id);
+    if (exit != SQLITE_OK)
+    {
+        fprintf(stderr, "Failed to bind to prepared statment: %s\n", sqlite3_errmsg(DB));
+        return NULL;
+    }
+    
+    int exitStep;
+    do {
+        exitStep = sqlite3_step(pStmt);
+    } while(exitStep == SQLITE_BUSY);
+    if (exitStep == SQLITE_ERROR)
+    {
+        fprintf(stderr, "Failed to step trough results: %s\n", sqlite3_errmsg(DB));
+        sqlite3_finalize(pStmt);
+        return NULL;
+    }
+    else if (exitStep == SQLITE_MISUSE)
+    {
+        fprintf(stderr, "Misuse\n");
+        sqlite3_finalize(pStmt);
+        return NULL;
+    }
+    
+    NoteData* nd = calloc(1, sizeof(NoteData));
+    if (!nd)
+    {
+        sqlite3_finalize(pStmt);
+        return NULL;
+        
+    }
+    nd->id = sqlite3_column_int64(pStmt, 0);
+    nd->name = strdup(sqlite3_value_text(pStmt, 1));
+    nd->userName = GetDecryptedBlob(pStmt, 2);
+    nd->email = GetDecryptedBlob(pStmt, 3);
+    nd->url = GetDecryptedBlob(pStmt, 4);
+    nd->password = GetDecryptedBlob(pStmt, 5);
+    nd->otherSecret = GetDecryptedBlob(pStmt, 6);
+    nd->created = sqlite3_column_int(pStmt, 7);
+    nd->modified = sqlite3_column_int(pStmt, 8);
+    
+    sqlite3_finalize(pStmt);
+    return nd;
+}
+
+static int InsertNoteData(NoteData* nd)
+{
+    if (!nd) return -1;
+    
+    char* query = "INSERT INTO SECRETS (NAME, USERNAME, EMAIL, URL, PASSWORD, OTHER_SECRET, CREATED) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING ID";
+    
+    sqlite3_stmt *pStmt;
+    char* pzTail;
+    int exit = sqlite3_prepare_v2(DB, query, strlen(query), &pStmt, &pzTail);
+    if (exit != SQLITE_OK)
+    {        
+        fprintf(stderr, "Failed to prepare statment: %s\n", sqlite3_errmsg(DB));
+        return -1;
+    }
+    
+    exit = sqlite3_bind_text(pStmt, 1, nd->name strlen(nd->name), SQLITE_STATIC);
+    if (exit != SQLITE_OK)
+    {
+        sqlite3_finalize(pStmt);
+        fprintf(stderr, "Failed to bind to prepared statment: %s\n", sqlite3_errmsg(DB));
+        return -1;
+    }
+    SetEncryptedBlob(stmt, 2, nd->userName);
+    SetEncryptedBlob(stmt, 3, nd->email);
+    SetEncryptedBlob(stmt, 4, nd->url);
+    SetEncryptedBlob(stmt, 5, nd->password);
+    SetEncryptedBlob(stmt, 6, nd->otherSecret);
+    exit = sqlite3_bind_int64(pStmt, 7, time(NULL));
+    if (exit != SQLITE_OK)
+    {
+        sqlite3_finalize(pStmt);
+        fprintf(stderr, "Failed to bind to prepared statment: %s\n", sqlite3_errmsg(DB));
+        return -1;
+    }
+    int exitStep;
+    do {
+        exitStep = sqlite3_step(pStmt);
+    } while(exitStep == SQLITE_BUSY);
+    if (exitStep == SQLITE_ERROR)
+    {
+        fprintf(stderr, "Failed to step trough results: %s\n", sqlite3_errmsg(DB));
+        sqlite3_finalize(pStmt);
+        return -1;
+    }
+    else if (exitStep == SQLITE_MISUSE)
+    {
+        fprintf(stderr, "Misuse\n");
+        sqlite3_finalize(pStmt);
+        return -1;
+    }
+    
+    nd->id = sqlite3_column_int64(pStmt, 0);
+    
+    sqlite3_finalize(pStmt);
+    return 0;
+}
+
+static int UpdateNoteData(NoteData* nd)
+{
+    if (!nd || nd->id == -1LL) return -1;
+    NoteData* existingND = GetNoteData(nd->id);
+    if (!existingND) return -1;
+    
+    int result = NoteData_Compare(existingND, nd);
+    NoteData_Free(existingND);
+    
+    if (result == 0)
+        return 0; // Nothing has changed
+     char* query = "UPDATE SECRETS SET NAME = ?, USERNAME = ?, EMAIL = ?, URL = ?, PASSWORD = ?, OTHER_SECRET = ?, MODIFIED = ? WHERE ID = ?";
+    
+    sqlite3_stmt *pStmt;
+    char* pzTail;
+    int exit = sqlite3_prepare_v2(DB, query, strlen(query), &pStmt, &pzTail);
+    if (exit != SQLITE_OK)
+    {        
+        fprintf(stderr, "Failed to prepare statment: %s\n", sqlite3_errmsg(DB));
+        return -1;
+    }
+    
+    exit = sqlite3_bind_text(pStmt, 1, nd->name strlen(nd->name), SQLITE_STATIC);
+    if (exit != SQLITE_OK)
+    {
+        sqlite3_finalize(pStmt);
+        fprintf(stderr, "Failed to bind to prepared statment: %s\n", sqlite3_errmsg(DB));
+        return NULL;
+    }
+    SetEncryptedBlob(stmt, 2, nd->userName);
+    SetEncryptedBlob(stmt, 3, nd->email);
+    SetEncryptedBlob(stmt, 4, nd->url);
+    SetEncryptedBlob(stmt, 5, nd->password);
+    SetEncryptedBlob(stmt, 6, nd->otherSecret);
+    exit = sqlite3_bind_int64(pStmt, 7, time(NULL));
+    if (exit != SQLITE_OK)
+    {
+        sqlite3_finalize(pStmt);
+        fprintf(stderr, "Failed to bind to prepared statment: %s\n", sqlite3_errmsg(DB));
+        return NULL;
+    }
+    exit = sqlite3_bind_int64(pStmt, 8, nd->id);
+    if (exit != SQLITE_OK)
+    {
+        sqlite3_finalize(pStmt);
+        fprintf(stderr, "Failed to bind to prepared statment: %s\n", sqlite3_errmsg(DB));
+        return NULL;
+    }
+    int exitStep;
+    do {
+        exitStep = sqlite3_step(pStmt);
+    } while(exitStep == SQLITE_BUSY);
+    if (exitStep == SQLITE_ERROR)
+    {
+        fprintf(stderr, "Failed to step trough results: %s\n", sqlite3_errmsg(DB));
+        sqlite3_finalize(pStmt);
+        return NULL;
+    }
+    else if (exitStep == SQLITE_MISUSE)
+    {
+        fprintf(stderr, "Misuse\n");
+        sqlite3_finalize(pStmt);
+        return NULL;
+    }
+    
+    sqlite3_finalize(pStmt);
+    return 0;
+}
+
+int InsertOrUpdateNoteData(NoteData* nd)
+{
+    if (!nd)
+        return -1;
+        
+    if (nd->id == -1LL)
+        return InsertNoteData(nd);
+
+    return UpdateNoteData(nd);
 }
 
 // Utility: extract filename from full path (cross-platform).
@@ -105,6 +538,7 @@ static char* GetFileName(const char* fullPath)
     if (!fileName)
         return NULL;
 
+    memcpy(fileName, fileNamePtr, len);
     memcpy(fileName, fileNamePtr, len);
     return fileName;
 }
@@ -173,7 +607,7 @@ static int IsKeyLoaded(void)
 // ------------------------------------------------------
 // 🔹 File I/O helpers
 // ------------------------------------------------------
-
+/*
 static unsigned char* ReadFileToBuffer(const char* path, size_t* outSize) {
     assert(path && outSize);
 
@@ -209,7 +643,7 @@ static int WriteBufferToFile(const char* path, const unsigned char* data, size_t
     fclose(f);
     return (written == size);
 }
-
+*/
 // ------------------------------------------------------
 // 🔹 Encryption / Decryption Helpers (IV embedded in buffer)
 // ------------------------------------------------------
@@ -339,7 +773,7 @@ static unsigned char* DecryptBuffer(const unsigned char* in_buf,
 // ------------------------------------------------------
 // 🔹 High-level functions (file handling)
 // ------------------------------------------------------
-
+/*
 char* ReadFileAndDecrypt(const char* dir, const char* name) {
     assert(dir && name);
 
@@ -420,7 +854,7 @@ int EncryptAndSaveFile(const char* dir, const char* name, const char* text)
     free(path);
 
     return ok;
-}
+}*/
 
 // Create a vault (verifier) file at checkFilePath using password.
 // Returns 0 on success, non-zero on error.
@@ -481,7 +915,6 @@ void Logout(void)
 {
     // Overwrite the global key with zeros.
     sodium_memzero(xchacha_key, crypto_aead_xchacha20poly1305_ietf_KEYBYTES);
-
     printf("User logged out. Key securely cleared.\n");
 }
 
@@ -678,7 +1111,7 @@ char* FileNameToNotesName(const char* fileName)
     return (char*)plain; // caller frees
 }
 
-char* MakeSecureNotesZipFilename(void)
+char* MakeJsonExportFilename(void)
 {
     uint64_t ts = (uint64_t)time(NULL);  // 64-bit timestamp
     uint32_t rnd = 0;
@@ -686,7 +1119,7 @@ char* MakeSecureNotesZipFilename(void)
     randombytes_buf(&rnd, sizeof(rnd));
 
     char buf[80];
-    int n = snprintf(buf, sizeof(buf), "MyEncryptedNotes_%llu_%u.zip",
+    int n = snprintf(buf, sizeof(buf), "MyPasswordVault_%llu_%u.json",
                      (unsigned long long)ts, rnd);
     if (n < 0) return NULL;
 
@@ -695,177 +1128,6 @@ char* MakeSecureNotesZipFilename(void)
 
     memcpy(out, buf, (size_t)n + 1);
     return out;
-}
-
-int ImportFromZip(const char* targetDir, const char* sourceZipFilePath)
-{
-    if (!targetDir || !sourceZipFilePath)
-        return -1;
-
-    // Try to open zip for reading
-    int err = 0;
-    zip_t* za = zip_open(sourceZipFilePath, ZIP_RDONLY, &err);
-    if (!za) {
-        zip_error_t error;
-        zip_error_init_with_code(&error, err);
-        fprintf(stderr, "Cannot open zip archive '%s': %s\n",
-                sourceZipFilePath, zip_error_strerror(&error));
-        zip_error_fini(&error);
-        return -1;
-    }
-
-    // Create output directory if it doesn’t exist
-    mkdir(targetDir);
-
-    zip_int64_t num_entries = zip_get_num_entries(za, 0);
-    for (zip_uint64_t i = 0; i < (zip_uint64_t)num_entries; i++) {
-        const char* name = zip_get_name(za, i, 0);
-        if (!name) {
-            fprintf(stderr, "Cannot get name for entry #%llu: %s\n",
-                    (unsigned long long)i, zip_strerror(za));
-            continue;
-        }
-
-        // Skip directories (entries ending with '/')
-        size_t nlen = strlen(name);
-        if (nlen == 0 || name[nlen - 1] == '/')
-            continue;
-
-        // Read file contents from zip
-        zip_file_t* zf = zip_fopen_index(za, i, 0);
-        if (!zf) {
-            fprintf(stderr, "Cannot open file '%s' in zip: %s\n",
-                    name, zip_strerror(za));
-            continue;
-        }
-
-        // Prepare output path
-        char* outPath = JoinPath(targetDir, name);
-        if (!outPath) {
-            zip_fclose(zf);
-            continue;
-        }
-
-        FILE* f = fopen(outPath, "wb");
-        if (!f) {
-            fprintf(stderr, "Cannot create output file '%s': %s\n",
-                    outPath, strerror(errno));
-            free(outPath);
-            zip_fclose(zf);
-            continue;
-        }
-
-        // Copy contents
-        char buf[8192];
-        zip_int64_t bytes_read;
-        while ((bytes_read = zip_fread(zf, buf, sizeof(buf))) > 0) {
-            fwrite(buf, 1, (size_t)bytes_read, f);
-        }
-
-        fclose(f);
-        free(outPath);
-        zip_fclose(zf);
-    }
-
-    if (zip_close(za) < 0) {
-        fprintf(stderr, "Cannot close zip archive '%s': %s\n",
-                sourceZipFilePath, zip_strerror(za));
-        return -1;
-    }
-
-    return 0;
-}
-
-int ExportToZip(const char* sourceDir, const char* targetZipFilePath, const char* checkFileName)
-{
-    if (!sourceDir || !targetZipFilePath || !checkFileName)
-        return -1;
-
-    if (!IsPasswordIsSetSplitPath(sourceDir, checkFileName))
-        return -1;
-
-    int err = 0;
-    zip_t* za = zip_open(targetZipFilePath, ZIP_CREATE | ZIP_EXCL, &err);
-    if (!za) {
-        zip_error_t error;
-        zip_error_init_with_code(&error, err);
-        fprintf(stderr, "Cannot open zip archive '%s': %s\n",
-                targetZipFilePath, zip_error_strerror(&error));
-        zip_error_fini(&error);
-        return -1;
-    }
-
-    // ---- Add verifier file ----
-    char* filePath = JoinPath(sourceDir, checkFileName);
-    if (!filePath) {
-        zip_close(za);
-        return -1;
-    }
-
-    struct zip_source* src = zip_source_file(za, filePath, 0, ZIP_LENGTH_TO_END);
-    free(filePath);
-    if (!src) {
-        fprintf(stderr, "Cannot create source for check file '%s': %s\n",
-                checkFileName, zip_strerror(za));
-        zip_close(za);
-        return -1;
-    }
-
-    if (zip_file_add(za, checkFileName, src, ZIP_FL_ENC_UTF_8) < 0) {
-        fprintf(stderr, "Cannot add check file to zip: %s\n", zip_strerror(za));
-        zip_source_free(src); // must free manually if zip_file_add fails
-        zip_close(za);
-        return -1;
-    }
-
-    // ---- Add all .enc files ----
-    DIR* dir = opendir(sourceDir);
-    if (!dir) {
-        fprintf(stderr, "Could not open directory '%s': %s\n",
-                sourceDir, strerror(errno));
-        zip_close(za);
-        return -1;
-    }
-
-    struct dirent* de;
-    while ((de = readdir(dir)) != NULL) {
-        size_t len = strlen(de->d_name);
-        if (len < 4 || strcmp(de->d_name + len - 4, ".enc") != 0)
-            continue;
-
-        char* encPath = JoinPath(sourceDir, de->d_name);
-        if (!encPath)
-            continue;
-
-        src = zip_source_file(za, encPath, 0, ZIP_LENGTH_TO_END);
-        free(encPath);
-        if (!src) {
-            fprintf(stderr, "Cannot create source for '%s': %s\n",
-                    de->d_name, zip_strerror(za));
-            closedir(dir);
-            zip_close(za);
-            return -1;
-        }
-
-        if (zip_file_add(za, de->d_name, src, ZIP_FL_ENC_UTF_8) < 0) {
-            fprintf(stderr, "Cannot add file '%s': %s\n",
-                    de->d_name, zip_strerror(za));
-            zip_source_free(src);
-            closedir(dir);
-            zip_close(za);
-            return -1;
-        }
-    }
-
-    closedir(dir);
-
-    if (zip_close(za) < 0) {
-        fprintf(stderr, "Cannot close zip archive '%s': %s\n",
-                targetZipFilePath, zip_strerror(za));
-        return -1;
-    }
-
-    return 0;
 }
 
 int WipeAndResetStorage(const char* sourceDir, const char* checkFileName)

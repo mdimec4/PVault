@@ -12,7 +12,6 @@
 #include <sys/stat.h>
 
 #include "core.h"
-#include "mdlinkedlist.h"
 #include "resource.h"
 #include "modern_ui.h"
 
@@ -27,6 +26,10 @@
 #pragma comment(linker,"\"/manifestdependency:type='win32' \
   name='Microsoft.Windows.Common-Controls' version='6.0.0.0' \
   processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
+#endif
+
+#ifdef _WIN32
+#define strdup _strdup
 #endif
 
 #define AUTOSAVE_TIMER_ID 42
@@ -48,17 +51,6 @@ const int CONTROL_SPACING = 10;
 HWND hTitleLabel;
 HBRUSH gBrushBackground;
 
-
-typedef struct NoteEntry {
-    wchar_t name[256];
-    char* fileName;  // malloc'ed
-} NoteEntry;
-
-struct FileEntry {
-    char fileName[MAX_PATH];
-    FILETIME ftLastWrite;
-};
-
 static wchar_t gDataDirW[MAX_PATH] = {0};
 static char    gDataDirA[MAX_PATH] = {0};
 
@@ -69,8 +61,8 @@ static BOOL gTextChanged = FALSE;
 
 HWND hPasswordLabel, hPasswordEdit, hPasswordEdit2, hUnlockButton, hWipeButton, hImportButton;
 HWND hStrengthBar, hHintLabel;
-HWND hEdit, hLogoutButton;
-HFONT hFont, hFontEdit;
+HWND hName, hUserName, hEmail, hUrl, hPassword, hOtherSecret, hLogoutButton;
+HFONT hFont;
 BOOL isUnlocked = FALSE;
 static BOOL gShowingLogoutMsg = FALSE;
 static BOOL gInLogout = FALSE;
@@ -86,20 +78,9 @@ void ShowLoginUI(HWND hwnd);
 void ShowEditorUI(HWND hwnd);
 void DestroyLoginUI(void);
 void DestroyEditorUI(HWND hwnd);
-void LoadAndDecryptText(HWND hEdit);
-void SaveEncryptedText(HWND hEdit);
+void LoadAndDecryptText(void);
+void SaveEncryptedText(void);
 static int CalculatePasswordStrength(const char *password);
-
-static void NotesEntry_Free(void* data)
-{
-    if (!data)
-        return;
-    NoteEntry* ne = (NoteEntry*)data;
-    SecureZeroMemory(ne->fileName, strlen(ne->fileName));
-    SecureZeroMemory(ne->name, sizeof(ne->name));
-    free(ne->fileName);
-    free(data);
-}
 
 static void NotesList_FreeAll(void)
 {
@@ -109,83 +90,30 @@ static void NotesList_FreeAll(void)
     gNotes = NULL;
 }
 
-static int CompareFileEntry(const void* a, const void* b)
+static void NotesList_LoadFromDb(HWND hNotesList)
 {
-    const struct FileEntry* fa = (const struct FileEntry*)a;
-    const struct FileEntry* fb = (const struct FileEntry*)b;
-    return CompareFileTime(&fb->ftLastWrite, &fa->ftLastWrite);
-}
-
-static void NotesList_LoadFromDir(HWND hNotesList)
-{
-    WIN32_FIND_DATAA fd;
-    
-    char* searchPath = JoinPath(gDataDirA, "*.enc");
-    if (!searchPath) return;
-    HANDLE hFind = FindFirstFileA(searchPath, &fd);
-    free(searchPath);
-    if (hFind == INVALID_HANDLE_VALUE)
-        return;
-
-    struct FileEntry files[512];
-    int fileCount = 0;
-
-    do {
-        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-            memcpy(files[fileCount].fileName, fd.cFileName, MAX_PATH - 1);
-            files[fileCount].fileName[MAX_PATH - 1] = 0;
-            files[fileCount].ftLastWrite = fd.ftLastWriteTime;
-            fileCount++;
-        }
-    } while (FindNextFileA(hFind, &fd) && fileCount < 512);
-
-    FindClose(hFind);
-
-    /* Sort by modification time, newest first */
-    qsort(files, fileCount, sizeof(files[0]), CompareFileEntry);
 
     NotesList_FreeAll();
     SendMessageW(hNotesList, LB_RESETCONTENT, 0, 0);
 
-    for (int i = 0; i < fileCount; i++) {
-        char* noteNameUtf8 = FileNameToNotesName(files[i].fileName);
-        if (!noteNameUtf8)
-            continue;
+    gNotes = LoadNotesList(NULL);
+    for (md_linked_list_el* el = gNotes; el; el = el->next) {
+        NoteEntry* n = (NoteEntry* )el->data;
 
-        int wlen = MultiByteToWideChar(CP_UTF8, 0, noteNameUtf8, -1, NULL, 0);
+        int wlen = MultiByteToWideChar(CP_UTF8, 0, n->name, -1, NULL, 0);
         if (wlen <= 0) {
-            SecureZeroMemory(noteNameUtf8, strlen(noteNameUtf8));
-            free(noteNameUtf8);
             continue;
         }
-
         wchar_t* wname = (wchar_t*)malloc(wlen * sizeof(wchar_t));
         if (!wname) {
-            SecureZeroMemory(noteNameUtf8, strlen(noteNameUtf8));
-            free(noteNameUtf8);
+
             continue;
         }
 
-        MultiByteToWideChar(CP_UTF8, 0, noteNameUtf8, -1, wname, wlen);
+        MultiByteToWideChar(CP_UTF8, 0, n->name, -1, wname, wlen);
 
-        NoteEntry* n = (NoteEntry*)calloc(1, sizeof(NoteEntry));
-        if (!n) {
-            SecureZeroMemory(noteNameUtf8, strlen(noteNameUtf8));
-            free(noteNameUtf8);
-            free(wname);
-            continue;
-        }
-
-        wcscpy_s(n->name, 256, wname);
-        n->fileName = _strdup(files[i].fileName);
-        
-        gNotes = md_linked_list_add(gNotes, n);
-
-        int idx = (int)SendMessageW(hNotesList, LB_ADDSTRING, 0, (LPARAM)n->name);
+        int idx = (int)SendMessageW(hNotesList, LB_ADDSTRING, 0, (LPARAM)wname);
         SendMessageW(hNotesList, LB_SETITEMDATA, idx, (LPARAM)n);
-
-        SecureZeroMemory(noteNameUtf8, strlen(noteNameUtf8));
-        free(noteNameUtf8);
         free(wname);
     }
 }
@@ -195,7 +123,7 @@ void InitStoragePath(void)
     // Get %LOCALAPPDATA%
     if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, gDataDirW)))
     {
-        wcscat_s(gDataDirW, MAX_PATH, L"\\MySecureNote");
+        wcscat_s(gDataDirW, MAX_PATH, L"\\MyPasswordVault");
         CreateDirectoryW(gDataDirW, NULL);
 
         // Convert UTF-16 → UTF-8 once
@@ -214,12 +142,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     LoadLibrary(TEXT("Msftedit.dll"));
     
     InitStoragePath();
-    if (Init() != 0) {
+    if (Init(gDataDirA) != 0) {
         MessageBox(NULL, L"Failed to initialize Secure Notes (libsodium error).", L"Fatal Error", MB_ICONERROR);
         return 1;
     }
     
-    const wchar_t CLASS_NAME[] = L"MyEncryptedNotesWindow";
+    const wchar_t CLASS_NAME[] = L"MyPasswordVaultWindow";
 
     WNDCLASSEX wc = {0};
     wc.cbSize = sizeof(WNDCLASSEX);
@@ -242,7 +170,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     RegisterClassEx(&wc);
 
     HWND hwnd = CreateWindowEx(
-        0, CLASS_NAME, L"MyEncryptedNotes",
+        0, CLASS_NAME, L"MyPasswordVault",
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT, CW_USEDEFAULT, 2048, 1024,
         NULL, NULL, hInstance, NULL);
@@ -312,7 +240,7 @@ static void PerformLogout(HWND hwnd, BOOL autoLogout)
     
     if (gCurrentNote && gTextChanged)
     {
-        SaveEncryptedText(hEdit);
+        SaveEncryptedText();
         gTextChanged = FALSE;
     }
 
@@ -534,18 +462,23 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         else if (LOWORD(wParam) == 3000 && HIWORD(wParam) == LBN_SELCHANGE) {
             // Auto-save current note before switching
             if (gCurrentNote && gTextChanged) {
-                SaveEncryptedText(hEdit);
+                SaveEncryptedText();
                 gTextChanged = FALSE;
             }
 
             int sel = (int)SendMessage(hNotesList, LB_GETCURSEL, 0, 0);
             if (sel != LB_ERR) {
-                SaveEncryptedText(hEdit);
+                SaveEncryptedText();
                 gCurrentNote = (NoteEntry*)SendMessage(hNotesList, LB_GETITEMDATA, sel, 0);
                 if (gCurrentNote) {
-                    LoadAndDecryptText(hEdit);
+                    LoadAndDecryptText();
                     gTextChanged = FALSE;
-                    EnableWindow(hEdit, TRUE);
+                    EnableWindow(hName, TRUE);
+                    EnableWindow(hUserName, TRUE);
+                    EnableWindow(hEmail, TRUE);
+                    EnableWindow(hUrl, TRUE);
+                    EnableWindow(hPassword, TRUE);
+                    EnableWindow(hOtherSecret, TRUE);
                 }
             }
         }
@@ -568,19 +501,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
                 char noteNameUtf8[256];
                 WideCharToMultiByte(CP_UTF8, 0, wNewName, -1, noteNameUtf8, sizeof(noteNameUtf8), NULL, NULL);
-                char* fileName = NotesNameToFileName(noteNameUtf8);
-                if (!fileName) {
-                    MessageBox(hwnd, L"Failed to create filename.", L"Error", MB_ICONERROR);
-                    return 0;
-                }
 
                 // Create note entry
                 NoteEntry* n = calloc(1, sizeof(NoteEntry));
-                wcscpy_s(n->name, 256, wNewName);
-                n->fileName = fileName;
+                if (!n)
+                    return 0;
+                n->id = -1LL;
+                n-> name = strdup(noteNameUtf8);
                
                // prepend to linked list
                md_linked_list_el* new_el = calloc(1, sizeof(md_linked_list_el));
+               if (!new_el)
+                   return 0;
                new_el->prev = NULL;
                new_el->next = gNotes;
                new_el->data = n;
@@ -604,8 +536,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 }
                     
                 gCurrentNote = n;
-                SetWindowTextW(hEdit, L"");
-                EnableWindow(hEdit, TRUE);
+                SetWindowTextW(hName, L"");
+                SetWindowTextW(hUserName, L"");
+                SetWindowTextW(hEmail, L"");
+                SetWindowTextW(hUrl, L"")
+                SetWindowTextW(hPassword, L"");
+                SetWindowTextW(hOtherSecret, L"");
+                EnableWindow(hName, TRUE);
+                EnableWindow(hUserName, TRUE);
+                EnableWindow(hEmail, TRUE);
+                EnableWindow(hUrl, TRUE);
+                EnableWindow(hPassword, TRUE);
+                EnableWindow(hOtherSecret, TRUE);
                 gTextChanged = FALSE;
                 EncryptAndSaveFile(gDataDirA, gCurrentNote->fileName, "");
             }
@@ -631,11 +573,21 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 gNotes = md_linked_list_remove(gNotes, remove_el, NotesEntry_Free);
 
             gCurrentNote = NULL;
-            WipeWindowText(hEdit);
-            EnableWindow(hEdit, FALSE);
+            WipeWindowText(hName);
+            WipeWindowText(hUserName);
+            WipeWindowText(hEmail);
+            WipeWindowText(hUrl);
+            WipeWindowText(hPassword);
+            WipeWindowText(hOtherSecret);
+            EnableWindow(hName, FALSE);
+            EnableWindow(hUserName, FALSE);
+            EnableWindow(hEmail, FALSE);
+            EnableWindow(hUrl, FALSE);
+            EnableWindow(hPassword, FALSE);
+            EnableWindow(hOtherSecret, FALSE);
         }
         else if (LOWORD(wParam) == 3003) { // EXPORT
-            char* suggestedName = MakeSecureNotesZipFilename();
+           /* char* suggestedName = MakeSecureNotesZipFilename();
 
             // Convert UTF-8 → UTF-16 for Windows dialog
             wchar_t wSuggested[260];
@@ -663,9 +615,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                      return 0;
                 }
                 MessageBoxW(hwnd, L"Export complete!", L"Success", MB_ICONINFORMATION);
-            }
+            }*/
         }
-        else if (HIWORD(wParam) == EN_CHANGE && (HWND)lParam == hEdit) {
+        else if (HIWORD(wParam) == EN_CHANGE && ((HWND)lParam == hUserName || (HWND)lParam == hPassword || (HWND)lParam == hOtherSecret) {
             gTextChanged = TRUE;
             ResetInactivityTimer(hwnd); // <--- reset timer on text change
 
@@ -715,7 +667,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             KillTimer(hwnd, AUTOSAVE_TIMER_ID);
             gAutoSaveTimer = 0;
             if (gTextChanged && gCurrentNote) {
-                SaveEncryptedText(hEdit);
+                SaveEncryptedText();
                 gTextChanged = FALSE;
             }
         }
@@ -788,9 +740,24 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                    buttonY, buttonHalfWidth, BUTTON_HEIGHT, TRUE);
             MoveWindow(hDeleteNoteButton,  MARGIN + buttonHalfWidth + CONTROL_SPACING,
                    buttonY, buttonHalfWidth, BUTTON_HEIGHT, TRUE);
-            MoveWindow(hEdit, listWidth + MARGIN, MARGIN,
+            MoveWindow(hName, listWidth + MARGIN, MARGIN,
                    rc.right - listWidth - 2 * MARGIN,
-                   listHeight, TRUE);
+                   40, TRUE);
+            MoveWindow(hUserName, listWidth + MARGIN, 2 * MARGIN + 40,
+                   rc.right - listWidth - 2 * MARGIN,
+                   40, TRUE);
+            MoveWindow(hEmail, listWidth + MARGIN, 3 * MARGIN + 2 * 40,
+                   rc.right - listWidth - 2 * MARGIN,
+                   40, TRUE);
+            MoveWindow(hUrl, listWidth + MARGIN, 4 * MARGIN + 3 * 40,
+                   rc.right - listWidth - 2 * MARGIN,
+                   40, TRUE);
+            MoveWindow(hPassword, listWidth + MARGIN, 5 * MARGIN + 4 * 40,
+                   rc.right - listWidth - 2 * MARGIN,
+                   40, TRUE);
+            MoveWindow(hOtherSecret, listWidth + MARGIN, 6 * MARGIN + 5 * 40,
+                   rc.right - listWidth - 2 * MARGIN,
+                   listHeight - 6 * MARGIN - 5 * 40, TRUE);
             MoveWindow(hExportButton, rc.right - 2 * MARGIN - BUTTON_WIDTH * 2 - CONTROL_SPACING,
                    buttonY, BUTTON_WIDTH, BUTTON_HEIGHT, TRUE);
             MoveWindow(hLogoutButton,  rc.right - MARGIN - BUTTON_WIDTH,
@@ -838,14 +805,34 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     case WM_DESTROY: {
         if (gCurrentNote && gTextChanged)
         {
-            SaveEncryptedText(hEdit);
+            SaveEncryptedText();
             gTextChanged = FALSE;
         }
         NotesList_FreeAll();
         
-        if (hEdit && IsWindow(hEdit)) {
-            WipeWindowText(hEdit);
-            DestroyWindow(hEdit);
+        if (hName && IsWindow(hName)) {
+            WipeWindowText(hName);
+            DestroyWindow(hName);
+        }
+        if (hUserName && IsWindow(hUserName)) {
+            WipeWindowText(hUserName);
+            DestroyWindow(hUserName);
+        }
+        if (hEmail && IsWindow(hEmail)) {
+            WipeWindowText(hEmail);
+            DestroyWindow(hEmail);
+        }
+        if (hurl && IsWindow(hUrl)) {
+            WipeWindowText(Url);
+            DestroyWindow(hUrl);
+        }
+        if (hPassword && IsWindow(hPassword)) {
+            WipeWindowText(hPassword);
+            DestroyWindow(hPassword);
+        }
+        if (hOtherSecret && IsWindow(hOtherSecret)) {
+            WipeWindowText(hOtherSecret);
+            DestroyWindow(hOtherSecret);
         }
         
         if (gBrushBackground)
@@ -854,7 +841,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             gBrushBackground = NULL;
         }
         
-        Logout();
+        Destroy();
         DeleteObject(hFont);
         PostQuitMessage(0);
         return 0;
@@ -1024,7 +1011,7 @@ void ShowEditorUI(HWND hwnd)
     SetWindowTheme(hNotesList, L"", L"");
         
     hNewNoteButton = CreateWindow(
-        L"BUTTON", L"New Note",
+        L"BUTTON", L"New account",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
         MARGIN, buttonY, buttonHalfWidth, BUTTON_HEIGHT,
         hwnd, (HMENU)3001, NULL, NULL);
@@ -1037,27 +1024,71 @@ void ShowEditorUI(HWND hwnd)
         hwnd, (HMENU)3002, NULL, NULL);
     ApplyModernButton(hDeleteNoteButton);
 
-    // Rich Edit for note text
-    hEdit = CreateWindowEx(
+    //
+    // name label
+    hName = CreateWindowEx(0, L"STATIC",
+        L"",
+        WS_CHILD | WS_VISIBLE | SS_CENTER,
+        listWidth + MARGIN, MARGIN, rc.right - listWidth - 2 * MARGIN, 40,
+        hwnd, NULL, GetModuleHandle(NULL), NULL);
+    SendMessage(hHintLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SetWindowTheme(hName, L"", L"");
+    
+    hUserName = CreateWindowEx(0, L"EDIT", L"",
+        WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | WS_TABSTOP,
+        listWidth + MARGIN, 2 * MARGIN + 40, rc.right - listWidth - 2 * MARGIN, 40,
+        hwnd, (HMENU)2497, NULL, NULL);
+    SetWindowTheme(hUserName, L"", L"");
+    SendMessage(hUserName, WM_SETFONT, (WPARAM)hFont, TRUE);
+    
+    hEmail = CreateWindowEx(0, L"EDIT", L"",
+        WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | WS_TABSTOP,
+        listWidth + MARGIN, 3 * MARGIN + 2 * 40, rc.right - listWidth - 2 * MARGIN, 40,
+        hwnd, (HMENU)2498, NULL, NULL);
+    SetWindowTheme(hEmail, L"", L"");
+    SendMessage(hEmail, WM_SETFONT, (WPARAM)hFont, TRUE);
+    
+    hUrl = CreateWindowEx(0, L"EDIT", L"",
+        WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | WS_TABSTOP,
+        listWidth + MARGIN, 4 * MARGIN + 3 * 40, rc.right - listWidth - 2 * MARGIN, 40,
+        hwnd, (HMENU)2498, NULL, NULL);
+    SetWindowTheme(hUrl, L"", L"");
+    SendMessage(hUrl, WM_SETFONT, (WPARAM)hFont, TRUE);
+    
+    hPassword = CreateWindowEx(0, L"EDIT", L"",
+        WS_CHILD | WS_VISIBLE | ES_PASSWORD | ES_AUTOHSCROLL | WS_TABSTOP,
+        listWidth + MARGIN, 5 * MARGIN + 4 * 40, rc.right - listWidth - 2 * MARGIN, 40
+        hwnd, (HMENU)2499, NULL, NULL);
+    SetWindowTheme(hPassword, L"", L"");
+    SendMessage(hPassword, WM_SETFONT, (WPARAM)hFont, TRUE);
+    
+        // Rich Edit for note text
+    hOtherSecret = CreateWindowEx(
         0, MSFTEDIT_CLASS, L"",
         WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL |
         ES_MULTILINE | ES_AUTOVSCROLL | ES_AUTOHSCROLL,
-        listWidth + MARGIN, MARGIN, rc.right - listWidth - 2 * MARGIN, listHeight,
-        hwnd, (HMENU)2000, NULL, NULL);
-    SetWindowTheme(hEdit, L"", L"");
+        rc.right - listWidth - 2 * MARGIN, listHeight - 6 * MARGIN - 5 * 40, rc.right - listWidth - 2 * MARGIN, 40
+        hwnd, (HMENU)2500, NULL, NULL);
+    SetWindowTheme(hOtherSecret, L"", L"");
+    SendMessage(hOtherSecret, WM_SETFONT, (WPARAM)hFont, TRUE);
+    //
     
-    LOGFONT editFont;
-    GetObject(hFont, sizeof(LOGFONT), &editFont);
-    editFont.lfHeight = -20;
-    hFontEdit = CreateFontIndirect(&editFont);
-    SendMessage(hEdit, WM_SETFONT, (WPARAM)hFontEdit, TRUE);
         
     // Subscribe to EN_CHANGE notifications
-    SendMessage(hEdit, EM_SETEVENTMASK, 0, ENM_CHANGE | ENM_UPDATE);
+    SendMessage(hUserName, EM_SETEVENTMASK, 0, ENM_CHANGE | ENM_UPDATE);
+    SendMessage(hEmail, EM_SETEVENTMASK, 0, ENM_CHANGE | ENM_UPDATE);
+    SendMessage(hUrl, EM_SETEVENTMASK, 0, ENM_CHANGE | ENM_UPDATE);
+    SendMessage(hPassword, EM_SETEVENTMASK, 0, ENM_CHANGE | ENM_UPDATE);
+    SendMessage(hOtherSecret, EM_SETEVENTMASK, 0, ENM_CHANGE | ENM_UPDATE);
     
-    NotesList_LoadFromDir(hNotesList);
+    NotesList_LoadFromDb(hNotesList);
     
-    EnableWindow(hEdit, FALSE);
+    EnableWindow(hName, FALSE);
+    EnableWindow(hUserName, FALSE);
+    EnableWindow(hEmail, FALSE);
+    EnableWindow(hUrl, FALSE);
+    EnableWindow(hPassword, FALSE);
+    EnableWindow(hOtherSecret, FALSE);
 
     // Bottom-right buttons
     hExportButton = CreateWindow(
@@ -1082,7 +1113,7 @@ void ShowEditorUI(HWND hwnd)
     
     int count = (int)SendMessage(hNotesList, LB_GETCOUNT, 0, 0);
     if (count == 0) {
-        MessageBox(hwnd, L"No notes found. Please create a new note to begin.", L"Welcome", MB_ICONINFORMATION);
+        MessageBox(hwnd, L"No accounts found. Please create a new acount to begin.", L"Welcome", MB_ICONINFORMATION);
     }
 }
 
@@ -1097,15 +1128,35 @@ void DestroyEditorUI(HWND hwnd)
     StopInactivityTimer(hwnd);
 
     // Securely clear text before destroying the editor control
-    if (hEdit && IsWindow(hEdit)) {
-        WipeWindowText(hEdit);
-        DestroyWindow(hEdit);
-        hEdit = NULL;
-        if (hFontEdit)
-        {
-            DeleteObject(hFontEdit);
-            hFontEdit = NULL;
-        }
+        // Securely clear text before destroying the editor control
+    if (hName && IsWindow(hName)) {
+        DestroyWindow(hName);
+        hName = NULL;
+    }
+    if (hUserName && IsWindow(hUserName)) {
+        WipeWindowText(hUserName);
+        DestroyWindow(hUserName);
+        hUserName = NULL;
+    }
+    if (hEmail && IsWindow(hEmail)) {
+        WipeWindowText(hEmail);
+        DestroyWindow(hEmail);
+        hEmail = NULL;
+    }
+        if (hUrl && IsWindow(hUrl)) {
+        WipeWindowText(hUrl);
+        DestroyWindow(hUrl);
+        hUrl = NULL;
+    }
+    if (hPassword && IsWindow(hPassword)) {
+        WipeWindowText(hPassword);
+        DestroyWindow(hPassword);
+        hPassword = NULL;
+    }
+    if (hOtherSecret && IsWindow(hOtherSecret)) {
+        WipeWindowText(hOtherSecret);
+        DestroyWindow(hOtherSecret);
+        hOtherSecret = NULL;
     }
 
     // Destroy all remaining editor UI elements
@@ -1141,10 +1192,15 @@ void DestroyEditorUI(HWND hwnd)
     gTextChanged = FALSE;
 }
 
-void LoadAndDecryptText(HWND hEdit)
+void LoadAndDecryptText(void)
 {
-    if (!gCurrentNote || !gCurrentNote->fileName || !*gCurrentNote->fileName) {
-        SetWindowTextW(hEdit, L"");
+    if (!gCurrentNote || gCurrentNote->id == -1LL) {
+        SetWindowTextW(hName, L"");
+        SetWindowTextW(hUserName, L"");
+        SetWindowTextW(hEmail, L"");
+        SetWindowTextW(hUrl, L"");
+        SetWindowTextW(hPassword, L"");
+        SetWindowTextW(hOtherSecret, L"");
         return;
     }
 
@@ -1164,7 +1220,7 @@ void LoadAndDecryptText(HWND hEdit)
     free(wtext);
 }
 
-void SaveEncryptedText(HWND hEdit)
+void SaveEncryptedText(void)
 {
     if (!gCurrentNote || !gCurrentNote->fileName || !*gCurrentNote->fileName)
         return;
