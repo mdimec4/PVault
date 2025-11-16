@@ -400,7 +400,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
              }
              else
              {
-                 MessageBox(hwnd, L"Wrong password or failed to derive AES key.", L"Error", MB_ICONERROR);
+                 MessageBox(hwnd, L"Wrong password or failed to derive key.", L"Error", MB_ICONERROR);
              }
 
              return 0;
@@ -409,7 +409,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         {
             int result = MessageBoxW(
                 hwnd,
-                L"Are you sure you want to wipe your existing notes storage? All notes will be permanently lost!",
+                L"Are you sure you want to wipe your existing accounts storage? All accounts will be permanently lost!",
                 L"Confirm Storage Wipe",
                 MB_ICONWARNING | MB_YESNO | MB_DEFBUTTON2
             );
@@ -433,6 +433,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         }
          else if (LOWORD(wParam) == 1004) // Import storage
         {
+            /*
             OPENFILENAMEW ofn = {0};
             wchar_t szFile[260] = L"";
 
@@ -456,7 +457,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 DestroyLoginUI();
                 ShowLoginUI(hwnd);
             }
-
+            */
             return 0;
         }
         else if (LOWORD(wParam) == 3000 && HIWORD(wParam) == LBN_SELCHANGE) {
