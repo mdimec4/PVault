@@ -51,7 +51,10 @@ md_linked_list_el* LoadNotesList(const char* filter);
 
 NoteData* NoteData_New(long long int id, const char* name, const char* userName, const char* email, const char* url, const char* password, const char* otherSecret, time_t created, time_t modified);
 void NoteData_Free(void* data);
+
+int DeleteNoteData(long long int id);
 NoteData* GetNoteData(long long int id);
+int InsertOrUpdateNoteData(NoteData* nd);
 
 char* NotesNameToFileName(const char* notesName);
 char* FileNameToNotesName(const char* fileName);

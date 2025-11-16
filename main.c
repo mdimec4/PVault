@@ -490,18 +490,20 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                     MessageBox(hwnd, L"Note name cannot be empty.", L"Error", MB_ICONERROR);
                     return 0;
                 }
+                
+                char noteNameUtf8[256];
+                WideCharToMultiByte(CP_UTF8, 0, wNewName, -1, noteNameUtf8, sizeof(noteNameUtf8), NULL, NULL);
 
                 // Check duplicates
                 for (md_linked_list_el* el = gNotes; el; el = el->next) {
                     NoteEntry* ne = (NoteEntry*)el->data;
-                    if (_wcsicmp(ne->name, wNewName) == 0) {
+                    if (strncmp(ne->name, noteNameUtf8, sizeof(noteNameUtf8)) == 0) {
                         MessageBox(hwnd, L"Note already exists.", L"Error", MB_ICONERROR);
                         return 0;
                     }
                 }
 
-                char noteNameUtf8[256];
-                WideCharToMultiByte(CP_UTF8, 0, wNewName, -1, noteNameUtf8, sizeof(noteNameUtf8), NULL, NULL);
+
 
                 // Create note entry
                 NoteEntry* n = calloc(1, sizeof(NoteEntry));
@@ -527,7 +529,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 for(md_linked_list_el* el = gNotes; el; el = el->next){
                     NoteEntry* ne = (NoteEntry*)el->data;
                     
-                    int idx = (int)SendMessageW(hNotesList, LB_ADDSTRING, 0, (LPARAM)ne->name);
+                    int idx = (int)SendMessageA(hNotesList, LB_ADDSTRING, 0, (LPARAM)ne->name);
                     SendMessageW(hNotesList, LB_SETITEMDATA, idx, (LPARAM)ne);
                     if (isNewElement)
                     {
@@ -537,10 +539,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 }
                     
                 gCurrentNote = n;
-                SetWindowTextW(hName, L"");
+                SetWindowTextW(hName, wNewName);
                 SetWindowTextW(hUserName, L"");
                 SetWindowTextW(hEmail, L"");
-                SetWindowTextW(hUrl, L"")
+                SetWindowTextW(hUrl, L"");
                 SetWindowTextW(hPassword, L"");
                 SetWindowTextW(hOtherSecret, L"");
                 EnableWindow(hName, TRUE);
@@ -550,7 +552,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 EnableWindow(hPassword, TRUE);
                 EnableWindow(hOtherSecret, TRUE);
                 gTextChanged = FALSE;
-                EncryptAndSaveFile(gDataDirA, gCurrentNote->fileName, "");
+                
+                NoteData* nd = NoteData_New(n->id, n->name, "", "", "", "", "", 0, 0);
+                InsertOrUpdateNoteData(nd);
+                n->id = nd->id;
+                NoteData_Free(nd);
             }
         }
         else if (LOWORD(wParam) == 3002) { // Delete
@@ -560,10 +566,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             NoteEntry* n = (NoteEntry*)SendMessage(hNotesList, LB_GETITEMDATA, sel, 0);
             if (!n) return 0;
 
-            char* path = JoinPath(gDataDirA, n->fileName);
-            if (!path) return 0;
-            DeleteFileA(path);
-            free(path);
+            if (n->id != -1LL)
+                DeleteNoteData(n->id);
             
             SendMessage(hNotesList, LB_DELETESTRING, sel, 0);
 
@@ -618,7 +622,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 MessageBoxW(hwnd, L"Export complete!", L"Success", MB_ICONINFORMATION);
             }*/
         }
-        else if (HIWORD(wParam) == EN_CHANGE && ((HWND)lParam == hUserName || (HWND)lParam == hPassword || (HWND)lParam == hOtherSecret) {
+        else if (HIWORD(wParam) == EN_CHANGE && ((HWND)lParam == hUserName || (HWND)lParam == hEmail || (HWND)lParam == hUrl || (HWND)lParam == hPassword || (HWND)lParam == hOtherSecret)) {
             gTextChanged = TRUE;
             ResetInactivityTimer(hwnd); // <--- reset timer on text change
 
@@ -758,7 +762,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                    40, TRUE);
             MoveWindow(hOtherSecret, listWidth + MARGIN, 6 * MARGIN + 5 * 40,
                    rc.right - listWidth - 2 * MARGIN,
-                   listHeight - 6 * MARGIN - 5 * 40, TRUE);
+                   listHeight - 5 * MARGIN - 5 * 40, TRUE);
             MoveWindow(hExportButton, rc.right - 2 * MARGIN - BUTTON_WIDTH * 2 - CONTROL_SPACING,
                    buttonY, BUTTON_WIDTH, BUTTON_HEIGHT, TRUE);
             MoveWindow(hLogoutButton,  rc.right - MARGIN - BUTTON_WIDTH,
@@ -823,8 +827,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             WipeWindowText(hEmail);
             DestroyWindow(hEmail);
         }
-        if (hurl && IsWindow(hUrl)) {
-            WipeWindowText(Url);
+        if (hUrl && IsWindow(hUrl)) {
+            WipeWindowText(hUrl);
             DestroyWindow(hUrl);
         }
         if (hPassword && IsWindow(hPassword)) {
@@ -848,7 +852,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         return 0;
     }
     }
-
     return DefWindowProc(hwnd, msg, wParam, lParam);
 }
 
@@ -865,7 +868,7 @@ void ShowLoginUI(HWND hwnd)
     const int editHeight = 28;
     const int spacing = 10;
 
-    hTitleLabel = CreateWindow(L"static", L"MyEncryptedNotes",
+    hTitleLabel = CreateWindow(L"static", L"MyPasswordVault",
         WS_CHILD | WS_VISIBLE | SS_CENTER,
         centerX - 150, centerY - 160, 300, 40,
         hwnd, NULL, NULL, NULL);
@@ -1058,7 +1061,7 @@ void ShowEditorUI(HWND hwnd)
     
     hPassword = CreateWindowEx(0, L"EDIT", L"",
         WS_CHILD | WS_VISIBLE | ES_PASSWORD | ES_AUTOHSCROLL | WS_TABSTOP,
-        listWidth + MARGIN, 5 * MARGIN + 4 * 40, rc.right - listWidth - 2 * MARGIN, 40
+        listWidth + MARGIN, 5 * MARGIN + 4 * 40, rc.right - listWidth - 2 * MARGIN, 40,
         hwnd, (HMENU)2499, NULL, NULL);
     SetWindowTheme(hPassword, L"", L"");
     SendMessage(hPassword, WM_SETFONT, (WPARAM)hFont, TRUE);
@@ -1068,7 +1071,7 @@ void ShowEditorUI(HWND hwnd)
         0, MSFTEDIT_CLASS, L"",
         WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL |
         ES_MULTILINE | ES_AUTOVSCROLL | ES_AUTOHSCROLL,
-        rc.right - listWidth - 2 * MARGIN, listHeight - 6 * MARGIN - 5 * 40, rc.right - listWidth - 2 * MARGIN, 40
+        listWidth + MARGIN, 6 * MARGIN + 5 * 40, rc.right - listWidth - 2 * MARGIN, listHeight - 5 * MARGIN - 5 * 40,
         hwnd, (HMENU)2500, NULL, NULL);
     SetWindowTheme(hOtherSecret, L"", L"");
     SendMessage(hOtherSecret, WM_SETFONT, (WPARAM)hFont, TRUE);
@@ -1205,46 +1208,64 @@ void LoadAndDecryptText(void)
         return;
     }
 
-    char* text = ReadFileAndDecrypt(gDataDirA, gCurrentNote->fileName);
-    if (!text) {
-        SetWindowTextW(hEdit, L"");
+    NoteData* nd = GetNoteData(gCurrentNote->id);
+    if (!nd)
+    {
+        SetWindowTextW(hName, L"");
+        SetWindowTextW(hUserName, L"");
+        SetWindowTextW(hEmail, L"");
+        SetWindowTextW(hUrl, L"");
+        SetWindowTextW(hPassword, L"");
+        SetWindowTextW(hOtherSecret, L"");
         return;
     }
 
-    int wlen = MultiByteToWideChar(CP_UTF8, 0, text, -1, NULL, 0);
-    wchar_t* wtext = malloc(wlen * sizeof(wchar_t));
-    MultiByteToWideChar(CP_UTF8, 0, text, -1, wtext, wlen);
-    SetWindowTextW(hEdit, wtext);
 
-    SecureZeroMemory(text, strlen(text));
-    free(text);
-    free(wtext);
+    SetWindowTextA(hName, nd->name);
+
+    SetWindowTextA(hUserName, nd->userName);
+    
+    SetWindowTextA(hEmail, nd->email);
+
+    SetWindowTextA(hUrl, nd->url);
+
+    SetWindowTextA(hPassword, nd->password);
+    
+    SetWindowTextA(hOtherSecret, nd->otherSecret);
+    
+    NoteData_Free(nd);
+}
+
+char* GetWText(HWND hwnd)
+{
+    if (!hwnd) return NULL;
+    
+    int len = GetWindowTextLengthA(hwnd);
+    if (len < 0) return NULL;
+
+    char* text = malloc(len + 1);
+    if (!text) return NULL;
+    GetWindowTextA(hwnd, text, len + 1);
+    return text;
 }
 
 void SaveEncryptedText(void)
 {
-    if (!gCurrentNote || !gCurrentNote->fileName || !*gCurrentNote->fileName)
+    if (!gCurrentNote)
         return;
 
-    int wlen = GetWindowTextLengthW(hEdit);
-    if (wlen < 0) return;
+    NoteData* nd = calloc(1, sizeof(NoteData));
+    nd->id = gCurrentNote->id;
+    nd->name = strdup(gCurrentNote->name);
+    nd->userName = GetWText(hUserName);
+    nd->email = GetWText(hEmail);
+    nd->url = GetWText(hUrl);
+    nd->password = GetWText(hPassword);
+    nd->otherSecret = GetWText(hOtherSecret);
 
-    wchar_t* wtext = malloc((wlen + 1) * sizeof(wchar_t));
-    if (!wtext) return;
-    GetWindowTextW(hEdit, wtext, wlen + 1);
-
-    int buflen = WideCharToMultiByte(CP_UTF8, 0, wtext, -1, NULL, 0, NULL, NULL);
-    char* text = malloc(buflen);
-    if (!text) { free(wtext); return; }
-    WideCharToMultiByte(CP_UTF8, 0, wtext, -1, text, buflen, NULL, NULL);
-
-    if (!EncryptAndSaveFile(gDataDirA, gCurrentNote->fileName, text))
-        MessageBox(NULL, L"Failed to save encrypted note.", L"Error", MB_ICONERROR);
-
-    SecureZeroMemory(text, buflen);
-    SecureZeroMemory(wtext, (wlen + 1) * sizeof(wchar_t));
-    free(text);
-    free(wtext);
+    if (InsertOrUpdateNoteData(nd) != 0)
+        MessageBox(NULL, L"Failed to save encrypted account.", L"Error", MB_ICONERROR);
+    gCurrentNote->id = nd->id;
 }
 
 static int CalculatePasswordStrength(const char *password) {

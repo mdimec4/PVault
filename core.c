@@ -70,16 +70,16 @@ int Init(const char* dataDir)
         return -1;
     }
     
-    const char* createSql = "CREATE TABLE IF NOT EXISTS SECRECTS ("
-    "ID INT PRIMARY KEY     NOT NULL,"
+    const char* createSql = "CREATE TABLE IF NOT EXISTS SECRETS ("
+    "ID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,"
     "NAME   TEXT            NOT NULL,"
     "USERNAME BLOB,"
     "EMAIL BLOB,"
     "URL BLOB,"
     "PASSWORD BLOB,"
     "OTHER_SECRET BLOB,"
-    "CREATED INT NOT NULL,"
-    "MODIFIED INT);";
+    "CREATED INTEGER NOT NULL,"
+    "MODIFIED INTEGER);";
     
     char* messaggeError;
     exit = sqlite3_exec(DB, createSql, NULL, 0, &messaggeError);
@@ -138,13 +138,17 @@ void NotesEntry_Free(void* data)
 static char* GetDecryptedBlob(sqlite3_stmt *stmt, int col)
 {
     int size = 0;
-    void* data = NULL;
+    const void* data;
     
     size = sqlite3_column_bytes(stmt, col);
     data = sqlite3_column_blob(stmt, col);
-    
+    if (!data)
+        return strdup("");
     size_t sz;
-    return DecryptBuffer(data, size, &sz);
+    char* ret = (char*) DecryptBuffer(data, size, &sz);
+    if (!ret)
+        return strdup("");
+    return ret;
 }
 
 static int SetEncryptedBlob(sqlite3_stmt *stmt, int col, const char* value)
@@ -153,7 +157,7 @@ static int SetEncryptedBlob(sqlite3_stmt *stmt, int col, const char* value)
         return -1;
         
     size_t blobLen;
-    unsigned char* blob = EncryptBuffer(value, strlen(value), &blobLen);
+    unsigned char* blob = EncryptBuffer((unsigned char*)value, strlen(value), &blobLen);
     if (!blob)
         return -1;
     int exit = sqlite3_bind_blob(stmt, col, blob, blobLen, free);
@@ -171,16 +175,16 @@ md_linked_list_el* LoadNotesList(const char* filter)
         return NULL;
     char* parameter = NULL;
     
-    char* query = "SELECT ID, NAME FROM SECRECTS ORDER BY MODIFIED DESC;";
+    char* query = "SELECT ID, NAME FROM SECRETS ORDER BY MODIFIED DESC;";
     if (filter) {
         size_t newSize = strlen(filter) + 2 + 1;
         parameter = calloc(newSize, 1);
-        snprintf(parameter, newSize - 1, "%%%s%%");
-        query = "SELECT ID, NAME FROM SECRECTS WHERE NAME LIKE ? ORDER BY ID DESC;";
+        snprintf(parameter, newSize - 1, "%%%s%%", filter);
+        query = "SELECT ID, NAME FROM SECRETS WHERE NAME LIKE ? ORDER BY ID DESC;";
     }
     
     sqlite3_stmt *pStmt;
-    char* pzTail;
+    const char* pzTail;
     int exit = sqlite3_prepare_v2(DB, query, strlen(query), &pStmt, &pzTail);
     if (exit != SQLITE_OK)
     {
@@ -190,20 +194,25 @@ md_linked_list_el* LoadNotesList(const char* filter)
         fprintf(stderr, "Failed to prepare statment: %s\n", sqlite3_errmsg(DB));
         return NULL;
     }
-    exit = sqlite3_bind_text(pStmt, 1, parameter, strlen(parameter), free);
-    if (exit != SQLITE_OK)
+    if (parameter)
     {
-        fprintf(stderr, "Failed to bind to prepared statment: %s\n", sqlite3_errmsg(DB));
-        return NULL;
+        exit = sqlite3_bind_text(pStmt, 1, parameter, strlen(parameter), free);
+        if (exit != SQLITE_OK)
+        {
+            fprintf(stderr, "Failed to bind to prepared statment: %s\n", sqlite3_errmsg(DB));
+            return NULL;
+        }
     }
     
     int exitStep;
     md_linked_list_el* result = NULL;
     for (exitStep = sqlite3_step(pStmt); exitStep == SQLITE_ROW || exitStep == SQLITE_BUSY; exitStep = sqlite3_step(pStmt))
     {
+        if (exitStep == SQLITE_BUSY)
+            continue;
         NoteEntry* ne = calloc(1, sizeof(NoteEntry));
         ne->id = sqlite3_column_int64(pStmt, 0);
-        ne->name = strdup(sqlite3_value_text(pStmt, 1));
+        ne->name = strdup((const char*)sqlite3_column_text(pStmt, 1));
         
         result = md_linked_list_add(result, ne);
     }
@@ -305,7 +314,53 @@ static int NoteData_Compare(NoteData* n1, NoteData* n2)
     if (MyStrcmp(n1->password, n2->password) != 0)
         return -1;
     if (MyStrcmp(n1->otherSecret, n2->otherSecret) != 0)
-        return -1
+        return -1;
+    return 0;
+}
+
+int DeleteNoteData(long long int id)
+{
+     if (!DB)
+        return -1;
+    if (id == -1LL)
+        return -1;
+        
+    char* query = "DELETE FROM SECRETS WHERE ID = ?;";
+
+    sqlite3_stmt *pStmt;
+    const char* pzTail;
+    int exit = sqlite3_prepare_v2(DB, query, strlen(query), &pStmt, &pzTail);
+    if (exit != SQLITE_OK)
+    {        
+        fprintf(stderr, "Failed to prepare statment: %s\n", sqlite3_errmsg(DB));
+        return -1;
+    }
+    
+    exit = sqlite3_bind_int64(pStmt, 1, id);
+    if (exit != SQLITE_OK)
+    {
+        fprintf(stderr, "Failed to bind to prepared statment: %s\n", sqlite3_errmsg(DB));
+        return -1;
+    }
+    
+    int exitStep;
+    do {
+        exitStep = sqlite3_step(pStmt);
+    } while(exitStep == SQLITE_BUSY);
+    if (exitStep == SQLITE_ERROR)
+    {
+        fprintf(stderr, "Failed to step trough results: %s\n", sqlite3_errmsg(DB));
+        sqlite3_finalize(pStmt);
+        return -1;
+    }
+    else if (exitStep == SQLITE_MISUSE)
+    {
+        fprintf(stderr, "Misuse\n");
+        sqlite3_finalize(pStmt);
+        return -1;
+    }
+    
+    sqlite3_finalize(pStmt);
     return 0;
 }
 
@@ -316,10 +371,10 @@ NoteData* GetNoteData(long long int id)
     if (id == -1LL)
         return NULL;
         
-    char* query = "SELECT ID, NAME USERNAME, EMAIL, URL, PASSWORD, OTHER_SECRET, CREATED, MODIFIED FROM SECRECTS WHERE ID = ?;";
+    char* query = "SELECT ID, NAME USERNAME, EMAIL, URL, PASSWORD, OTHER_SECRET, CREATED, MODIFIED FROM SECRETS WHERE ID = ?;";
     
     sqlite3_stmt *pStmt;
-    char* pzTail;
+    const char* pzTail;
     int exit = sqlite3_prepare_v2(DB, query, strlen(query), &pStmt, &pzTail);
     if (exit != SQLITE_OK)
     {        
@@ -350,6 +405,12 @@ NoteData* GetNoteData(long long int id)
         sqlite3_finalize(pStmt);
         return NULL;
     }
+    if (exitStep != SQLITE_ROW && exitStep != SQLITE_DONE)
+    {
+        fprintf(stderr, "No data\n");
+        sqlite3_finalize(pStmt);
+        return NULL;
+    }
     
     NoteData* nd = calloc(1, sizeof(NoteData));
     if (!nd)
@@ -359,7 +420,7 @@ NoteData* GetNoteData(long long int id)
         
     }
     nd->id = sqlite3_column_int64(pStmt, 0);
-    nd->name = strdup(sqlite3_value_text(pStmt, 1));
+    nd->name = strdup((const char*)sqlite3_column_text(pStmt, 1));
     nd->userName = GetDecryptedBlob(pStmt, 2);
     nd->email = GetDecryptedBlob(pStmt, 3);
     nd->url = GetDecryptedBlob(pStmt, 4);
@@ -379,7 +440,7 @@ static int InsertNoteData(NoteData* nd)
     char* query = "INSERT INTO SECRETS (NAME, USERNAME, EMAIL, URL, PASSWORD, OTHER_SECRET, CREATED) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING ID";
     
     sqlite3_stmt *pStmt;
-    char* pzTail;
+    const char* pzTail;
     int exit = sqlite3_prepare_v2(DB, query, strlen(query), &pStmt, &pzTail);
     if (exit != SQLITE_OK)
     {        
@@ -387,18 +448,18 @@ static int InsertNoteData(NoteData* nd)
         return -1;
     }
     
-    exit = sqlite3_bind_text(pStmt, 1, nd->name strlen(nd->name), SQLITE_STATIC);
+    exit = sqlite3_bind_text(pStmt, 1, nd->name, strlen(nd->name), SQLITE_STATIC);
     if (exit != SQLITE_OK)
     {
         sqlite3_finalize(pStmt);
         fprintf(stderr, "Failed to bind to prepared statment: %s\n", sqlite3_errmsg(DB));
         return -1;
     }
-    SetEncryptedBlob(stmt, 2, nd->userName);
-    SetEncryptedBlob(stmt, 3, nd->email);
-    SetEncryptedBlob(stmt, 4, nd->url);
-    SetEncryptedBlob(stmt, 5, nd->password);
-    SetEncryptedBlob(stmt, 6, nd->otherSecret);
+    SetEncryptedBlob(pStmt, 2, nd->userName);
+    SetEncryptedBlob(pStmt, 3, nd->email);
+    SetEncryptedBlob(pStmt, 4, nd->url);
+    SetEncryptedBlob(pStmt, 5, nd->password);
+    SetEncryptedBlob(pStmt, 6, nd->otherSecret);
     exit = sqlite3_bind_int64(pStmt, 7, time(NULL));
     if (exit != SQLITE_OK)
     {
@@ -412,7 +473,13 @@ static int InsertNoteData(NoteData* nd)
     } while(exitStep == SQLITE_BUSY);
     if (exitStep == SQLITE_ERROR)
     {
-        fprintf(stderr, "Failed to step trough results: %s\n", sqlite3_errmsg(DB));
+        fprintf(stderr, "Failed to step trough: %s\n", sqlite3_errmsg(DB));
+        sqlite3_finalize(pStmt);
+        return -1;
+    }
+    else if (exitStep == SQLITE_CONSTRAINT)
+    {
+        fprintf(stderr, "Constraint: %s\n", sqlite3_errmsg(DB));
         sqlite3_finalize(pStmt);
         return -1;
     }
@@ -443,7 +510,7 @@ static int UpdateNoteData(NoteData* nd)
      char* query = "UPDATE SECRETS SET NAME = ?, USERNAME = ?, EMAIL = ?, URL = ?, PASSWORD = ?, OTHER_SECRET = ?, MODIFIED = ? WHERE ID = ?";
     
     sqlite3_stmt *pStmt;
-    char* pzTail;
+    const char* pzTail;
     int exit = sqlite3_prepare_v2(DB, query, strlen(query), &pStmt, &pzTail);
     if (exit != SQLITE_OK)
     {        
@@ -451,31 +518,31 @@ static int UpdateNoteData(NoteData* nd)
         return -1;
     }
     
-    exit = sqlite3_bind_text(pStmt, 1, nd->name strlen(nd->name), SQLITE_STATIC);
+    exit = sqlite3_bind_text(pStmt, 1, nd->name, strlen(nd->name), SQLITE_STATIC);
     if (exit != SQLITE_OK)
     {
         sqlite3_finalize(pStmt);
         fprintf(stderr, "Failed to bind to prepared statment: %s\n", sqlite3_errmsg(DB));
-        return NULL;
+        return -1;
     }
-    SetEncryptedBlob(stmt, 2, nd->userName);
-    SetEncryptedBlob(stmt, 3, nd->email);
-    SetEncryptedBlob(stmt, 4, nd->url);
-    SetEncryptedBlob(stmt, 5, nd->password);
-    SetEncryptedBlob(stmt, 6, nd->otherSecret);
+    SetEncryptedBlob(pStmt, 2, nd->userName);
+    SetEncryptedBlob(pStmt, 3, nd->email);
+    SetEncryptedBlob(pStmt, 4, nd->url);
+    SetEncryptedBlob(pStmt, 5, nd->password);
+    SetEncryptedBlob(pStmt, 6, nd->otherSecret);
     exit = sqlite3_bind_int64(pStmt, 7, time(NULL));
     if (exit != SQLITE_OK)
     {
         sqlite3_finalize(pStmt);
         fprintf(stderr, "Failed to bind to prepared statment: %s\n", sqlite3_errmsg(DB));
-        return NULL;
+        return -1;
     }
     exit = sqlite3_bind_int64(pStmt, 8, nd->id);
     if (exit != SQLITE_OK)
     {
         sqlite3_finalize(pStmt);
         fprintf(stderr, "Failed to bind to prepared statment: %s\n", sqlite3_errmsg(DB));
-        return NULL;
+        return -1;
     }
     int exitStep;
     do {
@@ -485,13 +552,13 @@ static int UpdateNoteData(NoteData* nd)
     {
         fprintf(stderr, "Failed to step trough results: %s\n", sqlite3_errmsg(DB));
         sqlite3_finalize(pStmt);
-        return NULL;
+        return -1;
     }
     else if (exitStep == SQLITE_MISUSE)
     {
         fprintf(stderr, "Misuse\n");
         sqlite3_finalize(pStmt);
-        return NULL;
+        return -1;
     }
     
     sqlite3_finalize(pStmt);
