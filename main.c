@@ -49,7 +49,10 @@ const int BUTTON_WIDTH = 140;
 const int CONTROL_SPACING = 10;
 
 HWND hTitleLabel;
-HBRUSH gBrushBackground;
+static HBRUSH hLoginBrush = NULL;
+static HBRUSH hEditorBrush = NULL;
+static HBRUSH hBrushDisabled = NULL;
+static HBRUSH hBrushEnabled = NULL;
 
 static wchar_t gDataDirW[MAX_PATH] = {0};
 static char    gDataDirA[MAX_PATH] = {0};
@@ -62,6 +65,7 @@ static BOOL gTextChanged = FALSE;
 HWND hPasswordLabel, hPasswordEdit, hPasswordEdit2, hUnlockButton, hWipeButton, hImportButton;
 HWND hStrengthBar, hHintLabel;
 HWND hName, hUserName, hEmail, hUrl, hPassword, hOtherSecret, hLogoutButton;
+HWND hUserNameLabel, hEmailLabel, hUrlLabel, hPasswordVaultLabel, hOtherSecretLabel;
 HFONT hFont;
 BOOL isUnlocked = FALSE;
 static BOOL gShowingLogoutMsg = FALSE;
@@ -307,6 +311,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         InitCommonControlsEx(&icex);
         InitModernUI(hwnd);
         hFont = CreateModernUIFont(16, FALSE);
+        
+        // Create brushes once
+        hLoginBrush = CreateSolidBrush(COLOR_LOGIN_BG);
+        hEditorBrush = CreateSolidBrush(COLOR_EDITOR_BG);
+        
+        hBrushEnabled = CreateSolidBrush(RGB(255,255,255));       // white
+        hBrushDisabled = CreateSolidBrush(RGB(235,238,242));     // light gray
+    
         ShowLoginUI(hwnd);
         return 0;
     }
@@ -698,25 +710,48 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         break;
     case WM_CTLCOLORSTATIC:
     {
-        static HBRUSH hBrushStatic = NULL;
-        COLORREF bg = isUnlocked ? COLOR_EDITOR_BG : COLOR_LOGIN_BG;
-
-        if (hBrushStatic)
-            DeleteObject(hBrushStatic);
-        hBrushStatic = CreateSolidBrush(bg);
-
         HDC hdc = (HDC)wParam;
+        HWND hCtl = (HWND)lParam;
+
+        // Is this actually a disabled edit control?
+        TCHAR cls[32];
+        GetClassName(hCtl, cls, 32);
+
+        if (!_wcsicmp(cls, L"Edit") && !IsWindowEnabled(hCtl))
+        {
+            SetBkColor(hdc, RGB(235,238,242));   // disabled
+            return (INT_PTR)hBrushDisabled;
+        }
+
+        // For real static labels: use background (transparent)
         SetBkMode(hdc, TRANSPARENT);
-        SetTextColor(hdc, RGB(32, 32, 32));
-        return (INT_PTR)hBrushStatic;
+        return (INT_PTR)GetStockObject(NULL_BRUSH);
     }
     case WM_CTLCOLORBTN:
     case WM_CTLCOLORLISTBOX:
     {
         HDC hdc = (HDC)wParam;
+
+        // Text style
         SetBkMode(hdc, TRANSPARENT);
-        SetTextColor(hdc, RGB(32,32,32));   // darker gray text
-        return (INT_PTR)gBrushBackground;
+        SetTextColor(hdc, RGB(32, 32, 32));
+
+        // Return proper background brush
+        return (INT_PTR)(isUnlocked ? hEditorBrush : hLoginBrush);
+    }
+    case WM_CTLCOLOREDIT:
+    {
+        HDC hdc = (HDC)wParam;
+        HWND hCtl = (HWND)lParam;
+
+        if (!IsWindowEnabled(hCtl)) {
+            // Disabled EDIT → Windows sends WM_CTLCOLORSTATIC, but handle both
+            SetBkColor(hdc, RGB(235,238,242));
+            return (INT_PTR)hBrushDisabled;
+        }
+
+        SetBkColor(hdc, RGB(255,255,255));
+        return (INT_PTR)hBrushEnabled;
     }
     case WM_ERASEBKGND:
         PaintModernBackground(hwnd, (HDC)wParam, FALSE, CLR_INVALID);
@@ -819,32 +854,47 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             WipeWindowText(hName);
             DestroyWindow(hName);
         }
+        if (hUserNameLabel && IsWindow(hUserNameLabel)) {
+            DestroyWindow(hUserNameLabel);
+        }
         if (hUserName && IsWindow(hUserName)) {
             WipeWindowText(hUserName);
             DestroyWindow(hUserName);
+        }
+        if (hEmailLabel && IsWindow(hEmailLabel)) {
+            DestroyWindow(hEmailLabel);
         }
         if (hEmail && IsWindow(hEmail)) {
             WipeWindowText(hEmail);
             DestroyWindow(hEmail);
         }
+        if (hUrlLabel && IsWindow(hUrlLabel)) {
+            DestroyWindow(hUrlLabel);
+        }
         if (hUrl && IsWindow(hUrl)) {
             WipeWindowText(hUrl);
             DestroyWindow(hUrl);
         }
+        if (hPasswordVaultLabel && IsWindow(hPasswordVaultLabel)) {
+            DestroyWindow(hPasswordVaultLabel);
+        }
         if (hPassword && IsWindow(hPassword)) {
             WipeWindowText(hPassword);
             DestroyWindow(hPassword);
+        }
+        if (hOtherSecretLabel && IsWindow(hOtherSecretLabel)) {
+            DestroyWindow(hOtherSecretLabel);
         }
         if (hOtherSecret && IsWindow(hOtherSecret)) {
             WipeWindowText(hOtherSecret);
             DestroyWindow(hOtherSecret);
         }
         
-        if (gBrushBackground)
-        {
-            DeleteObject(gBrushBackground);
-            gBrushBackground = NULL;
-        }
+        if (hLoginBrush) { DeleteObject(hLoginBrush); hLoginBrush = NULL; }
+        if (hEditorBrush) { DeleteObject(hEditorBrush); hEditorBrush = NULL; }
+        
+        if (hBrushDisabled) { DeleteObject(hBrushDisabled); hBrushDisabled = NULL; }
+        if (hBrushEnabled) { DeleteObject(hBrushEnabled); hBrushEnabled = NULL; }
         
         Logout();
         DeleteObject(hFont);
@@ -1015,7 +1065,7 @@ void ShowEditorUI(HWND hwnd)
     SetWindowTheme(hNotesList, L"", L"");
         
     hNewNoteButton = CreateWindow(
-        L"BUTTON", L"New account",
+        L"BUTTON", L"New",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
         MARGIN, buttonY, buttonHalfWidth, BUTTON_HEIGHT,
         hwnd, (HMENU)3001, NULL, NULL);
@@ -1033,35 +1083,43 @@ void ShowEditorUI(HWND hwnd)
     hName = CreateWindowEx(0, L"STATIC",
         L"",
         WS_CHILD | WS_VISIBLE | SS_CENTER,
-        listWidth + MARGIN, MARGIN, rc.right - listWidth - 2 * MARGIN, 40,
+        listWidth + MARGIN, MARGIN, rc.right - listWidth - 2 * MARGIN, BUTTON_HEIGHT,
         hwnd, NULL, GetModuleHandle(NULL), NULL);
-    SendMessage(hHintLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
-    SetWindowTheme(hName, L"", L"");
+    SendMessage(hName, WM_SETFONT, (WPARAM)hFont, TRUE);
+    //SetWindowTheme(hName, L"", L"");
+    
+    hUserNameLabel = CreateWindowEx(0, L"STATIC",
+        L"User name:",
+        WS_CHILD | WS_VISIBLE | SS_CENTER,
+        listWidth + MARGIN, 2 * MARGIN + BUTTON_HEIGHT, BUTTON_WIDTH, BUTTON_HEIGHT,
+        hwnd, NULL, GetModuleHandle(NULL), NULL);
+    SendMessage(hUserNameLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SetWindowTheme(hUserNameLabel, L"", L"");
     
     hUserName = CreateWindowEx(0, L"EDIT", L"",
         WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | WS_TABSTOP,
-        listWidth + MARGIN, 2 * MARGIN + 40, rc.right - listWidth - 2 * MARGIN, 40,
+        listWidth + 2* MARGIN + BUTTON_WIDTH, 2 * MARGIN + BUTTON_HEIGHT, rc.right - listWidth - 3 * MARGIN - BUTTON_WIDTH, BUTTON_HEIGHT,
         hwnd, (HMENU)2497, NULL, NULL);
     SetWindowTheme(hUserName, L"", L"");
     SendMessage(hUserName, WM_SETFONT, (WPARAM)hFont, TRUE);
     
     hEmail = CreateWindowEx(0, L"EDIT", L"",
         WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | WS_TABSTOP,
-        listWidth + MARGIN, 3 * MARGIN + 2 * 40, rc.right - listWidth - 2 * MARGIN, 40,
+        listWidth + MARGIN, 3 * MARGIN + 2 * BUTTON_HEIGHT, rc.right - listWidth - 2 * MARGIN, BUTTON_HEIGHT,
         hwnd, (HMENU)2498, NULL, NULL);
     SetWindowTheme(hEmail, L"", L"");
     SendMessage(hEmail, WM_SETFONT, (WPARAM)hFont, TRUE);
     
     hUrl = CreateWindowEx(0, L"EDIT", L"",
         WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | WS_TABSTOP,
-        listWidth + MARGIN, 4 * MARGIN + 3 * 40, rc.right - listWidth - 2 * MARGIN, 40,
+        listWidth + MARGIN, 4 * MARGIN + 3 * BUTTON_HEIGHT, rc.right - listWidth - 2 * MARGIN, BUTTON_HEIGHT,
         hwnd, (HMENU)2498, NULL, NULL);
     SetWindowTheme(hUrl, L"", L"");
     SendMessage(hUrl, WM_SETFONT, (WPARAM)hFont, TRUE);
     
     hPassword = CreateWindowEx(0, L"EDIT", L"",
         WS_CHILD | WS_VISIBLE | ES_PASSWORD | ES_AUTOHSCROLL | WS_TABSTOP,
-        listWidth + MARGIN, 5 * MARGIN + 4 * 40, rc.right - listWidth - 2 * MARGIN, 40,
+        listWidth + MARGIN, 5 * MARGIN + 4 * BUTTON_HEIGHT, rc.right - listWidth - 2 * MARGIN, BUTTON_HEIGHT,
         hwnd, (HMENU)2499, NULL, NULL);
     SetWindowTheme(hPassword, L"", L"");
     SendMessage(hPassword, WM_SETFONT, (WPARAM)hFont, TRUE);
@@ -1071,7 +1129,7 @@ void ShowEditorUI(HWND hwnd)
         0, MSFTEDIT_CLASS, L"",
         WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL |
         ES_MULTILINE | ES_AUTOVSCROLL | ES_AUTOHSCROLL,
-        listWidth + MARGIN, 6 * MARGIN + 5 * 40, rc.right - listWidth - 2 * MARGIN, listHeight - 5 * MARGIN - 5 * 40,
+        listWidth + MARGIN, 6 * MARGIN + 5 * BUTTON_HEIGHT, rc.right - listWidth - 2 * MARGIN, listHeight - 5 * MARGIN - 5 * BUTTON_HEIGHT,
         hwnd, (HMENU)2500, NULL, NULL);
     SetWindowTheme(hOtherSecret, L"", L"");
     SendMessage(hOtherSecret, WM_SETFONT, (WPARAM)hFont, TRUE);
@@ -1137,25 +1195,45 @@ void DestroyEditorUI(HWND hwnd)
         DestroyWindow(hName);
         hName = NULL;
     }
+    if (hUserNameLabel && IsWindow(hUserNameLabel)) {
+        DestroyWindow(hUserNameLabel);
+        hUserNameLabel = NULL;
+    }
     if (hUserName && IsWindow(hUserName)) {
         WipeWindowText(hUserName);
         DestroyWindow(hUserName);
         hUserName = NULL;
+    }
+    if (hEmailLabel && IsWindow(hEmailLabel)) {
+        DestroyWindow(hEmailLabel);
+        hEmailLabel = NULL;
     }
     if (hEmail && IsWindow(hEmail)) {
         WipeWindowText(hEmail);
         DestroyWindow(hEmail);
         hEmail = NULL;
     }
-        if (hUrl && IsWindow(hUrl)) {
+    if (hUrlLabel && IsWindow(hUrlLabel)) {
+        DestroyWindow(hUrlLabel);
+        hUrlLabel = NULL;
+    }
+    if (hUrl && IsWindow(hUrl)) {
         WipeWindowText(hUrl);
         DestroyWindow(hUrl);
         hUrl = NULL;
+    }
+    if (hPasswordVaultLabel && IsWindow(hPasswordVaultLabel)) {
+        DestroyWindow(hPasswordVaultLabel);
+        hPasswordVaultLabel = NULL;
     }
     if (hPassword && IsWindow(hPassword)) {
         WipeWindowText(hPassword);
         DestroyWindow(hPassword);
         hPassword = NULL;
+    }
+    if (hOtherSecretLabel && IsWindow(hOtherSecretLabel)) {
+        DestroyWindow(hOtherSecretLabel);
+        hOtherSecretLabel = NULL;
     }
     if (hOtherSecret && IsWindow(hOtherSecret)) {
         WipeWindowText(hOtherSecret);

@@ -1185,7 +1185,7 @@ char* FileNameToNotesName(const char* fileName)
     return (char*)plain; // caller frees
 }
 
-char* MakeJsonExportFilename(void)
+char* MakeJsonExportFilename(void) // TODO
 {
     uint64_t ts = (uint64_t)time(NULL);  // 64-bit timestamp
     uint32_t rnd = 0;
@@ -1204,7 +1204,7 @@ char* MakeJsonExportFilename(void)
     return out;
 }
 
-int WipeAndResetStorage(const char* sourceDir, const char* checkFileName)
+int WipeAndResetStorage(const char* sourceDir, const char* checkFileName) // TODO make it delete DB file
 {
     if (!sourceDir || !checkFileName)
         return -1;
