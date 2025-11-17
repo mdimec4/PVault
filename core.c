@@ -371,7 +371,7 @@ NoteData* GetNoteData(long long int id)
     if (id == -1LL)
         return NULL;
         
-    char* query = "SELECT ID, NAME USERNAME, EMAIL, URL, PASSWORD, OTHER_SECRET, CREATED, MODIFIED FROM SECRETS WHERE ID = ?;";
+    char* query = "SELECT ID, NAME, USERNAME, EMAIL, URL, PASSWORD, OTHER_SECRET, CREATED, MODIFIED FROM SECRETS WHERE ID = ?;";
     
     sqlite3_stmt *pStmt;
     const char* pzTail;
