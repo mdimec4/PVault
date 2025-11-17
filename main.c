@@ -47,6 +47,7 @@ const int SPACING = 10;
 const int BUTTON_HEIGHT = 32;
 const int BUTTON_WIDTH = 140;
 const int CONTROL_SPACING = 10;
+const int LABEL_WIDTH = 100;
 
 HWND hTitleLabel;
 static HBRUSH hLoginBrush = NULL;
@@ -1086,50 +1087,82 @@ void ShowEditorUI(HWND hwnd)
         listWidth + MARGIN, MARGIN, rc.right - listWidth - 2 * MARGIN, BUTTON_HEIGHT,
         hwnd, NULL, GetModuleHandle(NULL), NULL);
     SendMessage(hName, WM_SETFONT, (WPARAM)hFont, TRUE);
-    //SetWindowTheme(hName, L"", L"");
+    SetWindowTheme(hName, L"", L"");
     
     hUserNameLabel = CreateWindowEx(0, L"STATIC",
         L"User name:",
-        WS_CHILD | WS_VISIBLE | SS_CENTER,
-        listWidth + MARGIN, 2 * MARGIN + BUTTON_HEIGHT, BUTTON_WIDTH, BUTTON_HEIGHT,
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        listWidth + MARGIN, 2 * MARGIN + BUTTON_HEIGHT, LABEL_WIDTH, BUTTON_HEIGHT,
         hwnd, NULL, GetModuleHandle(NULL), NULL);
     SendMessage(hUserNameLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
     SetWindowTheme(hUserNameLabel, L"", L"");
     
     hUserName = CreateWindowEx(0, L"EDIT", L"",
         WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | WS_TABSTOP,
-        listWidth + 2* MARGIN + BUTTON_WIDTH, 2 * MARGIN + BUTTON_HEIGHT, rc.right - listWidth - 3 * MARGIN - BUTTON_WIDTH, BUTTON_HEIGHT,
+        listWidth + 2* MARGIN + LABEL_WIDTH, 2 * MARGIN + BUTTON_HEIGHT, rc.right - listWidth - 3 * MARGIN - LABEL_WIDTH, BUTTON_HEIGHT,
         hwnd, (HMENU)2497, NULL, NULL);
     SetWindowTheme(hUserName, L"", L"");
     SendMessage(hUserName, WM_SETFONT, (WPARAM)hFont, TRUE);
     
+    hEmailLabel = CreateWindowEx(0, L"STATIC",
+        L"Email:",
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        listWidth + MARGIN, 3 * MARGIN + 2 * BUTTON_HEIGHT, LABEL_WIDTH, BUTTON_HEIGHT,
+        hwnd, NULL, GetModuleHandle(NULL), NULL);
+    SendMessage(hEmailLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SetWindowTheme(hEmailLabel, L"", L"");
+    
     hEmail = CreateWindowEx(0, L"EDIT", L"",
         WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | WS_TABSTOP,
-        listWidth + MARGIN, 3 * MARGIN + 2 * BUTTON_HEIGHT, rc.right - listWidth - 2 * MARGIN, BUTTON_HEIGHT,
+        listWidth + 2* MARGIN + LABEL_WIDTH, 3 * MARGIN + 2 * BUTTON_HEIGHT, rc.right - listWidth - 3 * MARGIN - LABEL_WIDTH, BUTTON_HEIGHT,
         hwnd, (HMENU)2498, NULL, NULL);
     SetWindowTheme(hEmail, L"", L"");
     SendMessage(hEmail, WM_SETFONT, (WPARAM)hFont, TRUE);
     
+    hUrlLabel = CreateWindowEx(0, L"STATIC",
+        L"URL:",
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        listWidth + MARGIN, 4 * MARGIN + 3 * BUTTON_HEIGHT, LABEL_WIDTH, BUTTON_HEIGHT,
+        hwnd, NULL, GetModuleHandle(NULL), NULL);
+    SendMessage(hUrlLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SetWindowTheme(hUrlLabel, L"", L"");
+    
     hUrl = CreateWindowEx(0, L"EDIT", L"",
         WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | WS_TABSTOP,
-        listWidth + MARGIN, 4 * MARGIN + 3 * BUTTON_HEIGHT, rc.right - listWidth - 2 * MARGIN, BUTTON_HEIGHT,
+        listWidth + 2* MARGIN + LABEL_WIDTH, 4 * MARGIN + 3 * BUTTON_HEIGHT, rc.right - listWidth - 3 * MARGIN - LABEL_WIDTH, BUTTON_HEIGHT,
         hwnd, (HMENU)2498, NULL, NULL);
     SetWindowTheme(hUrl, L"", L"");
     SendMessage(hUrl, WM_SETFONT, (WPARAM)hFont, TRUE);
     
+    hPasswordVaultLabel = CreateWindowEx(0, L"STATIC",
+        L"Password:",
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        listWidth + MARGIN, 5 * MARGIN + 4 * BUTTON_HEIGHT, LABEL_WIDTH, BUTTON_HEIGHT,
+        hwnd, NULL, GetModuleHandle(NULL), NULL);
+    SendMessage(hPasswordVaultLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SetWindowTheme(hPasswordVaultLabel, L"", L"");
+    
     hPassword = CreateWindowEx(0, L"EDIT", L"",
         WS_CHILD | WS_VISIBLE | ES_PASSWORD | ES_AUTOHSCROLL | WS_TABSTOP,
-        listWidth + MARGIN, 5 * MARGIN + 4 * BUTTON_HEIGHT, rc.right - listWidth - 2 * MARGIN, BUTTON_HEIGHT,
+        listWidth + 2* MARGIN + LABEL_WIDTH, 5 * MARGIN + 4 * BUTTON_HEIGHT, rc.right - listWidth - 3 * MARGIN - LABEL_WIDTH, BUTTON_HEIGHT,
         hwnd, (HMENU)2499, NULL, NULL);
     SetWindowTheme(hPassword, L"", L"");
     SendMessage(hPassword, WM_SETFONT, (WPARAM)hFont, TRUE);
+    
+    hOtherSecretLabel = CreateWindowEx(0, L"STATIC",
+        L"Other secrets:",
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        listWidth + MARGIN, 6 * MARGIN + 5 * BUTTON_HEIGHT, LABEL_WIDTH, BUTTON_HEIGHT,
+        hwnd, NULL, GetModuleHandle(NULL), NULL);
+    SendMessage(hOtherSecretLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SetWindowTheme(hOtherSecretLabel, L"", L"");
     
         // Rich Edit for note text
     hOtherSecret = CreateWindowEx(
         0, MSFTEDIT_CLASS, L"",
         WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL |
         ES_MULTILINE | ES_AUTOVSCROLL | ES_AUTOHSCROLL,
-        listWidth + MARGIN, 6 * MARGIN + 5 * BUTTON_HEIGHT, rc.right - listWidth - 2 * MARGIN, listHeight - 5 * MARGIN - 5 * BUTTON_HEIGHT,
+        listWidth + 2* MARGIN + LABEL_WIDTH, 6 * MARGIN + 5 * BUTTON_HEIGHT,rc.right - listWidth - 3 * MARGIN - LABEL_WIDTH, listHeight - 5 * MARGIN - 5 * BUTTON_HEIGHT,
         hwnd, (HMENU)2500, NULL, NULL);
     SetWindowTheme(hOtherSecret, L"", L"");
     SendMessage(hOtherSecret, WM_SETFONT, (WPARAM)hFont, TRUE);
