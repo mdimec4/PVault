@@ -42,8 +42,7 @@ int IsPasswordIsSetSplitPath(const char* checkDirPath, const char* checkFileName
 int IsPasswordIsSet(const char* checkFilePath);
 
 // Initialization / cleanup
-int Init(const char* dataDir);
-void Destroy(void);
+int Init();
 void Logout(void);
 
 void NotesEntry_Free(void* data);

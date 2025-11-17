@@ -59,7 +59,12 @@ static const size_t SALT_LEN_DEFAULT = 16;
 static const uint64_t OPSLIMIT_DEFAULT = 3;              // Argon2 ops (time) - tune as desired
 static const uint64_t MEMLIMIT_DEFAULT = 64ULL * 1024 * 1024; // 64 MiB
 
-int Init(const char* dataDir)
+int Init()
+{
+    return sodium_init();
+}
+
+int InitSQL(const char* dataDir)
 {
     char* dbPath = JoinPath(dataDir, "SecureStorage.db");
     
@@ -92,9 +97,8 @@ int Init(const char* dataDir)
     return sodium_init();
 }
 
-void Destroy(void)
+void DestroySQL(void)
 {
-    Logout();
     if (DB) {
         sqlite3_close(DB);
         DB = NULL;
@@ -983,6 +987,7 @@ void Logout(void)
     // Overwrite the global key with zeros.
     sodium_memzero(xchacha_key, crypto_aead_xchacha20poly1305_ietf_KEYBYTES);
     printf("User logged out. Key securely cleared.\n");
+    DestroySQL();
 }
 
 // Check verifier file and if ok, fill global 'key' with derived key and return 1.
@@ -1004,6 +1009,7 @@ int CheckPasswordAndDeriveEncKey(const char *password, const char* checkDirPath,
     if (access(filePath, F_OK) != 0) {
         if (CreateVerifierFileAndSetKey(filePath, password) != 0) {
             free(filePath);
+            InitSQL(checkDirPath);
             return 1;
         }
     }
@@ -1067,6 +1073,7 @@ int CheckPasswordAndDeriveEncKey(const char *password, const char* checkDirPath,
     int ok = (sodium_memcmp(computed_verifier, stored_verifier, VERIFIER_LEN) == 0);
     if (ok) {
         memcpy(xchacha_key, derived_key, crypto_aead_xchacha20poly1305_ietf_KEYBYTES);
+        InitSQL(checkDirPath);
     } else {
         Logout();
     }

@@ -142,8 +142,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     LoadLibrary(TEXT("Msftedit.dll"));
     
     InitStoragePath();
-    if (Init(gDataDirA) != 0) {
-        MessageBox(NULL, L"Failed to initialize Secure Notes (libsodium error).", L"Fatal Error", MB_ICONERROR);
+    if (Init() != 0) {
+        MessageBox(NULL, L"Failed to initialize MyPasswordVault (libsodium error).", L"Fatal Error", MB_ICONERROR);
         return 1;
     }
     
@@ -846,7 +846,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             gBrushBackground = NULL;
         }
         
-        Destroy();
+        Logout();
         DeleteObject(hFont);
         PostQuitMessage(0);
         return 0;
