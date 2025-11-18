@@ -66,7 +66,7 @@ static BOOL gTextChanged = FALSE;
 HWND hPasswordLabel, hPasswordEdit, hPasswordEdit2, hUnlockButton, hWipeButton, hImportButton;
 HWND hStrengthBar, hHintLabel;
 HWND hName, hUserName, hEmail, hUrl, hPassword, hOtherSecret, hLogoutButton;
-HWND hUserNameLabel, hEmailLabel, hUrlLabel, hPasswordVaultLabel, hOtherSecretLabel;
+HWND hUserNameLabel, hEmailLabel, hUrlLabel, hUrlOpenButton, hPasswordVaultLabel, hPasswordCopyButton, hPasswordGenerateButton, hOtherSecretLabel;
 HFONT hFont;
 BOOL isUnlocked = FALSE;
 static BOOL gShowingLogoutMsg = FALSE;
@@ -564,6 +564,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 EnableWindow(hUrl, TRUE);
                 EnableWindow(hPassword, TRUE);
                 EnableWindow(hOtherSecret, TRUE);
+                EnableWindow(hUrlOpenButton, FALSE);
+                EnableWindow(hPasswordCopyButton, FALSE);
+                EnableWindow(hPasswordGenerateButton, TRUE);
                 gTextChanged = FALSE;
                 
                 NoteData* nd = NoteData_New(n->id, n->name, "", "", "", "", "", 0, 0);
@@ -603,6 +606,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             EnableWindow(hUrl, FALSE);
             EnableWindow(hPassword, FALSE);
             EnableWindow(hOtherSecret, FALSE);
+            EnableWindow(hUrlOpenButton, FALSE);
+            EnableWindow(hPasswordCopyButton, FALSE);
+            EnableWindow(hPasswordGenerateButton, FALSE);
         }
         else if (LOWORD(wParam) == 3003) { // EXPORT
            /* char* suggestedName = MakeSecureNotesZipFilename();
@@ -648,6 +654,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 AUTOSAVE_DELAY_MS,
                 NULL
             );
+            
+            if ((HWND)lParam == hUrl)
+            {
+                int urlLen = GetWindowTextLengthW(hUrl);
+                EnableWindow(hUrlOpenButton, urlLen > 0);
+            }
+            else if ((HWND)lParam == hPassword)
+            {
+                int passLen = GetWindowTextLengthW(hPassword);
+                EnableWindow(hPasswordCopyButton, passLen > 0);
+                EnableWindow(hPasswordGenerateButton, passLen == 0);
+            }
         }
         else if ((HWND)lParam == hPasswordEdit && HIWORD(wParam) == EN_CHANGE)
         {
@@ -876,12 +894,21 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             WipeWindowText(hUrl);
             DestroyWindow(hUrl);
         }
+        if (hUrlOpenButton && IsWindow(hUrlOpenButton)) {
+            DestroyWindow(hUrlOpenButton);
+        }
         if (hPasswordVaultLabel && IsWindow(hPasswordVaultLabel)) {
             DestroyWindow(hPasswordVaultLabel);
         }
         if (hPassword && IsWindow(hPassword)) {
             WipeWindowText(hPassword);
             DestroyWindow(hPassword);
+        }
+        if (hPasswordCopyButton && IsWindow(hPasswordCopyButton)) {
+            DestroyWindow(hPasswordCopyButton);
+        }
+        if (hPasswordGenerateButton && IsWindow(hPasswordGenerateButton)) {
+            DestroyWindow(hPasswordGenerateButton);
         }
         if (hOtherSecretLabel && IsWindow(hOtherSecretLabel)) {
             DestroyWindow(hOtherSecretLabel);
@@ -1134,6 +1161,14 @@ void ShowEditorUI(HWND hwnd)
     SetWindowTheme(hUrl, L"", L"");
     SendMessage(hUrl, WM_SETFONT, (WPARAM)hFont, TRUE);
     
+    hUrlOpenButton = CreateWindow(
+        L"BUTTON", L"Open URL",
+        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+         rc.right - 2 * (MARGIN + BUTTON_WIDTH), 4 * MARGIN + 3 * BUTTON_HEIGHT, BUTTON_WIDTH, BUTTON_HEIGHT,
+        hwnd, (HMENU)3600, NULL, NULL);
+    SetWindowTheme(hUrlOpenButton, L"", L"");
+    ApplyModernButton(hUrlOpenButton);
+    
     hPasswordVaultLabel = CreateWindowEx(0, L"STATIC",
         L"Password:",
         WS_CHILD | WS_VISIBLE | SS_LEFT,
@@ -1148,6 +1183,22 @@ void ShowEditorUI(HWND hwnd)
         hwnd, (HMENU)2499, NULL, NULL);
     SetWindowTheme(hPassword, L"", L"");
     SendMessage(hPassword, WM_SETFONT, (WPARAM)hFont, TRUE);
+    
+    hPasswordCopyButton = CreateWindow(
+        L"BUTTON", L"Copy pasword",
+        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+         rc.right - 2 * (MARGIN + BUTTON_WIDTH), 5 * MARGIN + 4 * BUTTON_HEIGHT, BUTTON_WIDTH, BUTTON_HEIGHT,
+        hwnd, (HMENU)3601, NULL, NULL);
+    SetWindowTheme(hPasswordCopyButton, L"", L"");
+    ApplyModernButton(hPasswordCopyButton);
+    
+    hPasswordGenerateButton = CreateWindow(
+        L"BUTTON", L"Generate pasword",
+        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+         rc.right - MARGIN - BUTTON_WIDTH, 5 * MARGIN + 4 * BUTTON_HEIGHT, BUTTON_WIDTH, BUTTON_HEIGHT,
+        hwnd, (HMENU)3602, NULL, NULL);
+    SetWindowTheme(hPasswordGenerateButton, L"", L"");
+    ApplyModernButton(hPasswordGenerateButton);
     
     hOtherSecretLabel = CreateWindowEx(0, L"STATIC",
         L"Other secrets:",
@@ -1184,6 +1235,9 @@ void ShowEditorUI(HWND hwnd)
     EnableWindow(hUrl, FALSE);
     EnableWindow(hPassword, FALSE);
     EnableWindow(hOtherSecret, FALSE);
+    EnableWindow(hUrlOpenButton, FALSE);
+    EnableWindow(hPasswordCopyButton, FALSE);
+    EnableWindow(hPasswordGenerateButton, FALSE);
 
     // Bottom-right buttons
     hExportButton = CreateWindow(
@@ -1205,6 +1259,9 @@ void ShowEditorUI(HWND hwnd)
     SendMessage(hDeleteNoteButton, WM_SETFONT, (WPARAM)hFont, TRUE);
     SendMessage(hExportButton, WM_SETFONT, (WPARAM)hFont, TRUE);
     SendMessage(hLogoutButton, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessage(hUrlOpenButton, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessage(hPasswordCopyButton, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessage(hPasswordGenerateButton, WM_SETFONT, (WPARAM)hFont, TRUE);
     
     int count = (int)SendMessage(hNotesList, LB_GETCOUNT, 0, 0);
     if (count == 0) {
@@ -1255,6 +1312,10 @@ void DestroyEditorUI(HWND hwnd)
         DestroyWindow(hUrl);
         hUrl = NULL;
     }
+    if (hUrlOpenButton && IsWindow(hUrlOpenButton)) {
+        DestroyWindow(hUrlOpenButton);
+        hUrlOpenButton = NULL;
+    }
     if (hPasswordVaultLabel && IsWindow(hPasswordVaultLabel)) {
         DestroyWindow(hPasswordVaultLabel);
         hPasswordVaultLabel = NULL;
@@ -1263,6 +1324,14 @@ void DestroyEditorUI(HWND hwnd)
         WipeWindowText(hPassword);
         DestroyWindow(hPassword);
         hPassword = NULL;
+    }
+    if (hPasswordCopyButton && IsWindow(hPasswordCopyButton)) {
+        DestroyWindow(hPasswordCopyButton);
+        hPasswordCopyButton = NULL;
+    }
+    if (hPasswordGenerateButton && IsWindow(hPasswordGenerateButton)) {
+        DestroyWindow(hPasswordGenerateButton);
+        hPasswordGenerateButton = NULL;
     }
     if (hOtherSecretLabel && IsWindow(hOtherSecretLabel)) {
         DestroyWindow(hOtherSecretLabel);
@@ -1316,6 +1385,9 @@ void LoadAndDecryptText(void)
         SetWindowTextW(hUrl, L"");
         SetWindowTextW(hPassword, L"");
         SetWindowTextW(hOtherSecret, L"");
+        EnableWindow(hUrlOpenButton, FALSE);
+        EnableWindow(hPasswordCopyButton, FALSE);
+        EnableWindow(hPasswordGenerateButton, FALSE);
         return;
     }
 
@@ -1328,6 +1400,9 @@ void LoadAndDecryptText(void)
         SetWindowTextW(hUrl, L"");
         SetWindowTextW(hPassword, L"");
         SetWindowTextW(hOtherSecret, L"");
+        EnableWindow(hUrlOpenButton, FALSE);
+        EnableWindow(hPasswordCopyButton, FALSE);
+        EnableWindow(hPasswordGenerateButton, FALSE);
         return;
     }
 
@@ -1339,8 +1414,11 @@ void LoadAndDecryptText(void)
     SetWindowTextA(hEmail, nd->email);
 
     SetWindowTextA(hUrl, nd->url);
+    EnableWindow(hUrlOpenButton, (nd->url && strlen(nd->url) > 0));
 
     SetWindowTextA(hPassword, nd->password);
+    EnableWindow(hPasswordCopyButton, (nd->password && strlen(nd->password) > 0));
+    EnableWindow(hPasswordGenerateButton, !(nd->password && strlen(nd->password) > 0));
     
     SetWindowTextA(hOtherSecret, nd->otherSecret);
     
@@ -1375,7 +1453,12 @@ void SaveEncryptedText(void)
     nd->otherSecret = GetWText(hOtherSecret);
 
     if (InsertOrUpdateNoteData(nd) != 0)
+    {
+        NoteData_Free(nd);
         MessageBox(NULL, L"Failed to save encrypted account.", L"Error", MB_ICONERROR);
+        return;
+    }
+    NoteData_Free(nd);
     gCurrentNote->id = nd->id;
 }
 
