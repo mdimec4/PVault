@@ -1,5 +1,6 @@
 #define _UNICODE
 #include <windows.h>
+#include <shellapi.h>
 #include <richedit.h>
 #include <commdlg.h>
 #include <shlobj.h>
@@ -23,6 +24,7 @@
 #pragma comment(lib, "uxtheme.lib")
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "comctl32.lib")
+#pragma comment(lib, "Shell32")
 #pragma comment(linker,"\"/manifestdependency:type='win32' \
   name='Microsoft.Windows.Common-Controls' version='6.0.0.0' \
   processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
@@ -86,6 +88,7 @@ void DestroyEditorUI(HWND hwnd);
 void LoadAndDecryptText(void);
 void SaveEncryptedText(void);
 static int CalculatePasswordStrength(const char *password);
+void CopyEditToClipboard(HWND hWndOwner, HWND hwnd);
 
 static void NotesList_FreeAll(void)
 {
@@ -640,6 +643,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 }
                 MessageBoxW(hwnd, L"Export complete!", L"Success", MB_ICONINFORMATION);
             }*/
+        }
+        else if (LOWORD(wParam) == 3600) { // OPEN URL
+            int lenUrl = GetWindowTextLengthA(hUrl) + 1;
+            char* url = malloc(lenUrl);
+            GetWindowTextA(hUrl, url, lenUrl);
+            ShellExecuteA( NULL, NULL, url, NULL, NULL, SW_SHOWNORMAL);
+            free(url);
+        }
+        else if (LOWORD(wParam) == 3601) { // COPY PASSWORD
+            CopyEditToClipboard(hwnd, hPassword);
+        }
+        else if (LOWORD(wParam) == 3602) { // GENERATE PASSWORD
         }
         else if (HIWORD(wParam) == EN_CHANGE && ((HWND)lParam == hUserName || (HWND)lParam == hEmail || (HWND)lParam == hUrl || (HWND)lParam == hPassword || (HWND)lParam == hOtherSecret)) {
             gTextChanged = TRUE;
@@ -1482,4 +1497,47 @@ static int CalculatePasswordStrength(const char *password) {
     if (length >= 16) score += 1;
 
     return score; // range 0–7
+}
+
+void CopyEditToClipboard(HWND hWndOwner, HWND hwnd)
+{
+    // 1. Get text length (not counting null-terminator)
+    int len = GetWindowTextLengthW(hwnd);
+    if (len <= 0)
+        return;
+
+    // 2. Allocate buffer for the text (len + 1 for terminator)
+    int byteSize = (len + 1) * sizeof(wchar_t);
+
+    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, byteSize);
+    if (!hMem)
+        return;
+
+    // 3. Lock the memory and copy text
+    wchar_t *pMem = GlobalLock(hMem);
+    if (!pMem) {
+        GlobalFree(hMem);
+        return;
+    }
+
+    GetWindowTextW(hwnd, pMem, len + 1);
+    GlobalUnlock(hMem);
+
+    // 4. Open clipboard
+    if (!OpenClipboard(hWndOwner)) {
+        GlobalFree(hMem);
+        return;
+    }
+
+    // 5. Clear previous clipboard contents
+    EmptyClipboard();
+
+    // 6. Set Unicode text into clipboard
+    SetClipboardData(CF_UNICODETEXT, hMem);
+
+    // ⚠️ IMPORTANT:
+    // After SetClipboardData() succeeds, DO NOT free hMem.
+    // The clipboard owns it now.
+
+    CloseClipboard();
 }

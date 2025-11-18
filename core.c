@@ -424,7 +424,8 @@ NoteData* GetNoteData(long long int id)
         
     }
     nd->id = sqlite3_column_int64(pStmt, 0);
-    nd->name = strdup((const char*)sqlite3_column_text(pStmt, 1));
+    const char* name = (const char*)sqlite3_column_text(pStmt, 1);
+    nd->name = strdup(name ? name : "");
     nd->userName = GetDecryptedBlob(pStmt, 2);
     nd->email = GetDecryptedBlob(pStmt, 3);
     nd->url = GetDecryptedBlob(pStmt, 4);
