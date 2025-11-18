@@ -649,10 +649,17 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         else if (LOWORD(wParam) == 3601) { // COPY PASSWORD
             CopyEditToClipboard(hwnd, hPassword);
         }
-        else if (LOWORD(wParam) == 3602) { // GENERATE PASSWORD
+        else if (LOWORD(wParam) == 3602 && gCurrentNote) { // GENERATE PASSWORD
             char* pass = GeneratePassword();
             SetWindowTextA(hPassword, pass);
+            SecureZeroMemory(pass, strlen(pass));
             free(pass);
+
+            EnableWindow(hPasswordGenerateButton, FALSE);
+            EnableWindow(hPasswordCopyButton, TRUE);
+            
+            SaveEncryptedText();
+            gTextChanged = FALSE;
         }
         else if (HIWORD(wParam) == EN_CHANGE && ((HWND)lParam == hUserName || (HWND)lParam == hEmail || (HWND)lParam == hUrl || (HWND)lParam == hPassword || (HWND)lParam == hOtherSecret)) {
             gTextChanged = TRUE;
