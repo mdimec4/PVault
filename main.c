@@ -87,7 +87,6 @@ void DestroyLoginUI(void);
 void DestroyEditorUI(HWND hwnd);
 void LoadAndDecryptText(void);
 void SaveEncryptedText(void);
-static int CalculatePasswordStrength(const char *password);
 void CopyEditToClipboard(HWND hWndOwner, HWND hwnd);
 
 static void NotesList_FreeAll(void)
@@ -343,11 +342,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
              
              if (hPasswordEdit2 != NULL)
              {             
-                if (strlen(password) < 12 || 
-                    !strpbrk(password, "abcdefghijklmnopqrstuvwxyz") ||
-                    !strpbrk(password, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") ||
-                    !strpbrk(password, "0123456789") ||
-                    !strpbrk(password, "!@#$%^&*()-_=+[]{};:'\",.<>?/|\\`~")) 
+                if (!IsPasswordSecure(password)) 
                 {
                     WipeWindowText(hPasswordEdit2);
                      
@@ -655,6 +650,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             CopyEditToClipboard(hwnd, hPassword);
         }
         else if (LOWORD(wParam) == 3602) { // GENERATE PASSWORD
+            char* pass = GeneratePassword();
+            SetWindowTextA(hPassword, pass);
+            free(pass);
         }
         else if (HIWORD(wParam) == EN_CHANGE && ((HWND)lParam == hUserName || (HWND)lParam == hEmail || (HWND)lParam == hUrl || (HWND)lParam == hPassword || (HWND)lParam == hOtherSecret)) {
             gTextChanged = TRUE;
@@ -1475,28 +1473,6 @@ void SaveEncryptedText(void)
     }
     NoteData_Free(nd);
     gCurrentNote->id = nd->id;
-}
-
-static int CalculatePasswordStrength(const char *password) {
-    int length = strlen(password);
-    int hasLower = 0, hasUpper = 0, hasDigit = 0, hasSpecial = 0;
-    int score = 0;
-
-    for (int i = 0; i < length; i++) {
-        if (password[i] >= 'a' && password[i] <= 'z') hasLower = 1;
-        else if (password[i] >= 'A' && password[i] <= 'Z') hasUpper = 1;
-        else if (password[i] >= '0' && password[i] <= '9') hasDigit = 1;
-        else if (password[i] >= 33 && password[i] <= 126) hasSpecial = 1;
-    }
-
-    if (hasLower) score += 1;
-    if (hasUpper) score += 1;
-    if (hasDigit) score += 1;
-    if (hasSpecial) score += 1;
-    if (length >= 12) score += 2;
-    if (length >= 16) score += 1;
-
-    return score; // range 0–7
 }
 
 void CopyEditToClipboard(HWND hWndOwner, HWND hwnd)

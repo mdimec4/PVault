@@ -55,6 +55,10 @@ int DeleteNoteData(long long int id);
 NoteData* GetNoteData(long long int id);
 int InsertOrUpdateNoteData(NoteData* nd);
 
+int CalculatePasswordStrength(const char *password);
+int IsPasswordSecure(const char* password);
+char* GeneratePassword(void);
+
 char* NotesNameToFileName(const char* notesName);
 char* FileNameToNotesName(const char* fileName);
 

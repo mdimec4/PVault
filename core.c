@@ -59,6 +59,8 @@ static const size_t SALT_LEN_DEFAULT = 16;
 static const uint64_t OPSLIMIT_DEFAULT = 3;              // Argon2 ops (time) - tune as desired
 static const uint64_t MEMLIMIT_DEFAULT = 64ULL * 1024 * 1024; // 64 MiB
 
+const char passCharMap[94] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+[]{};:'\",.<>?/|\\`~";
+
 int Init()
 {
     return sodium_init();
@@ -93,8 +95,7 @@ int InitSQL(const char* dataDir)
         sqlite3_free(messaggeError);
         return -1;
     }
-    
-    return sodium_init();
+    return 0;
 }
 
 void DestroySQL(void)
@@ -616,6 +617,7 @@ static char* GetFileName(const char* fullPath)
 }
 */
 
+
 // Read entire file into heap buffer. On success returns pointer (must free) and sets *fileLen.
 // On failure returns NULL and *fileLen is undefined.
 static char* ReadFileAll(const char* filePath, size_t* fileLen) {
@@ -840,6 +842,58 @@ static unsigned char* DecryptBuffer(const unsigned char* in_buf,
 
     free(payload);
     return plain;  // caller frees
+}
+
+int CalculatePasswordStrength(const char *password) {
+    int length = strlen(password);
+    int hasLower = 0, hasUpper = 0, hasDigit = 0, hasSpecial = 0;
+    int score = 0;
+
+    for (int i = 0; i < length; i++) {
+        if (password[i] >= 'a' && password[i] <= 'z') hasLower = 1;
+        else if (password[i] >= 'A' && password[i] <= 'Z') hasUpper = 1;
+        else if (password[i] >= '0' && password[i] <= '9') hasDigit = 1;
+        else if (password[i] >= 33 && password[i] <= 126) hasSpecial = 1;
+    }
+
+    if (hasLower) score += 1;
+    if (hasUpper) score += 1;
+    if (hasDigit) score += 1;
+    if (hasSpecial) score += 1;
+    if (length >= 12) score += 2;
+    if (length >= 16) score += 1;
+
+    return score; // range 0–7
+}
+
+int IsPasswordSecure(const char* password)
+{
+    if (strlen(password) < 12 || 
+    !strpbrk(password, "abcdefghijklmnopqrstuvwxyz") ||
+    !strpbrk(password, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") ||
+    !strpbrk(password, "0123456789") ||
+    !strpbrk(password, "!@#$%^&*()-_=+[]{};:'\",.<>?/|\\`~"))
+        return 0;
+        
+    return 1;
+}
+
+char* GeneratePassword(void)
+{
+    char* pass = calloc(21 + 1, 1);
+    
+    do {
+        GenerateRandomBytes((unsigned char*)pass, 21);
+        for(int i = 0; i < 21; i++)
+        {
+            char c = pass[i];
+            int j = c % sizeof(passCharMap);
+            c = passCharMap[j];
+            if (c == '\0') c = 'X';
+            pass[i] = c;
+        }
+    } while (!IsPasswordSecure(pass));
+    return pass;
 }
 
 // ------------------------------------------------------
