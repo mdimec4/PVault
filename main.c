@@ -480,12 +480,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             return 0;
         }
         else if (LOWORD(wParam) == 3000 && HIWORD(wParam) == LBN_SELCHANGE) {
-            // Auto-save current note before switching
-            if (gCurrentNote && gTextChanged) {
-                SaveEncryptedText();
-                gTextChanged = FALSE;
-            }
-
             int sel = (int)SendMessage(hNotesList, LB_GETCURSEL, 0, 0);
             if (sel != LB_ERR) {
                 SaveEncryptedText();
@@ -617,7 +611,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             EnableWindow(hPasswordGenerateButton, FALSE);
         }
         else if (LOWORD(wParam) == 3003) { // EXPORT
-            if (gCurrentNote)
+            if (gCurrentNote && gTextChanged)
             {
                 SaveEncryptedText();
                 gTextChanged = FALSE;
@@ -1508,7 +1502,7 @@ void SaveEncryptedText(void)
 
     NoteData* nd = calloc(1, sizeof(NoteData));
     nd->id = gCurrentNote->id;
-    nd->name = strdup(gCurrentNote->name);
+    nd->name = strdup(gCurrentNote->name ? gCurrentNote->name : "");
     nd->userName = GetWText(hUserName);
     nd->email = GetWText(hEmail);
     nd->url = GetWText(hUrl);
@@ -1521,8 +1515,8 @@ void SaveEncryptedText(void)
         MessageBox(NULL, L"Failed to save encrypted account.", L"Error", MB_ICONERROR);
         return;
     }
-    NoteData_Free(nd);
     gCurrentNote->id = nd->id;
+    NoteData_Free(nd);
 }
 
 void CopyEditToClipboard(HWND hWndOwner, HWND hwnd)

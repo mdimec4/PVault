@@ -218,8 +218,8 @@ md_linked_list_el* LoadNotesList(const char* filter)
             continue;
         NoteEntry* ne = calloc(1, sizeof(NoteEntry));
         ne->id = sqlite3_column_int64(pStmt, 0);
-        ne->name = strdup((const char*)sqlite3_column_text(pStmt, 1));
-        
+        const char* name = (const char*)sqlite3_column_text(pStmt, 1);
+        ne->name = strdup(name ? name : "");
         result = md_linked_list_add(result, ne);
     }
     if (exitStep == SQLITE_ERROR)
@@ -896,92 +896,6 @@ char* GeneratePassword(void)
     } while (!IsPasswordSecure(pass));
     return pass;
 }
-
-// ------------------------------------------------------
-// 🔹 High-level functions (file handling)
-// ------------------------------------------------------
-/*
-char* ReadFileAndDecrypt(const char* dir, const char* name) {
-    assert(dir && name);
-
-    if (!IsKeyLoaded()) {
-        fprintf(stderr, "Error: key not loaded.\n");
-        return NULL;
-    }
-
-    char* path = JoinPath(dir, name);
-    if (!path) return NULL;
-
-    size_t file_len;
-    unsigned char* file_buf = ReadFileToBuffer(path, &file_len);
-    free(path);
-    if (!file_buf) return NULL;
-
-    size_t plain_len;
-    unsigned char* plain = DecryptBuffer(file_buf, file_len, &plain_len);
-    if(!plain)
-    {
-        free(file_buf);
-        return NULL;
-    }
-
-    free(file_buf);
-    return (char*)plain; // caller frees
-}
-
-int EncryptAndSaveFile(const char* dir, const char* name, const char* text)
-{
-    assert(dir && name && text);
-
-    if (!IsKeyLoaded()) {
-        fprintf(stderr, "Error: key not loaded.\n");
-        return 0;
-    }
-
-    char* path = JoinPath(dir, name);
-    if (!path)
-        return 0;
-
-    // --- 1. Check if an identical note already exists ---
-    struct stat st;
-    if (stat(path, &st) == 0 && st.st_size > 0)
-    {
-        // Try to decrypt existing file
-        unsigned char* oldPlain = (unsigned char*)ReadFileAndDecrypt(dir, name);
-        if (oldPlain)
-        {
-            // Compare decrypted contents to new plaintext
-            if (strcmp((const char*)oldPlain, text) == 0)
-            {
-                sodium_memzero(oldPlain, strlen((char*)oldPlain));
-                free(oldPlain);
-                free(path);
-                return 1; // identical — skip re-encryption
-            }
-            sodium_memzero(oldPlain, strlen((char*)oldPlain));
-            free(oldPlain);
-        }
-    }
-
-    // --- 2. Encrypt new text ---
-    size_t enc_len = 0;
-    unsigned char* enc_buf = EncryptBuffer((const unsigned char*)text, strlen(text), &enc_len);
-    if (!enc_buf)
-    {
-        free(path);
-        return 0;
-    }
-
-    // --- 3. Write encrypted data to disk ---
-    int ok = WriteBufferToFile(path, enc_buf, enc_len);
-
-    // --- 4. Secure cleanup ---
-    sodium_memzero(enc_buf, enc_len);
-    free(enc_buf);
-    free(path);
-
-    return ok;
-}*/
 
 // Create a vault (verifier) file at checkFilePath using password.
 // Returns 0 on success, non-zero on error.
