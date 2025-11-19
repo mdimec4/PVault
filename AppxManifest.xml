@@ -33,7 +33,7 @@
                  Executable="MyPasswordVault.exe"
                  EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
-          DisplayName="Secure Notes"
+          DisplayName="MyPasswordVault"
           Description="Securely encrypt and organize your passwords."
           BackgroundColor="transparent"
           Square150x150Logo="Assets\Square150x150Logo.png"
