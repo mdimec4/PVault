@@ -61,9 +61,8 @@ int CalculatePasswordStrength(const char *password);
 int IsPasswordSecure(const char* password);
 char* GeneratePassword(void);
 
-char* NotesNameToFileName(const char* notesName);
-char* FileNameToNotesName(const char* fileName);
-
 char* MakeZipExportFilename(void);
+int ExportToZip(const char* sourceDir, const char* targetZipFilePath, const char* checkFileName, const char* dbFileName);
+int ImportFromZip(const char* targetDir, const char* sourceZipFilePath);
 int WipeAndResetStorage(const char* sourceDir, const char* checkFileNamem, const char* sqlFileName);
 #endif // CORE_H

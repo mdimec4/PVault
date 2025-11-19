@@ -454,7 +454,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         }
          else if (LOWORD(wParam) == 1004) // Import storage
         {
-            /*
             OPENFILENAMEW ofn = {0};
             wchar_t szFile[260] = L"";
 
@@ -478,7 +477,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 DestroyLoginUI();
                 ShowLoginUI(hwnd);
             }
-            */
             return 0;
         }
         else if (LOWORD(wParam) == 3000 && HIWORD(wParam) == LBN_SELCHANGE) {
@@ -619,7 +617,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             EnableWindow(hPasswordGenerateButton, FALSE);
         }
         else if (LOWORD(wParam) == 3003) { // EXPORT
-           /* char* suggestedName = MakeSecureNotesZipFilename();
+            if (gCurrentNote)
+            {
+                SaveEncryptedText();
+                gTextChanged = FALSE;
+            }
+           char* suggestedName = MakeZipExportFilename();
 
             // Convert UTF-8 → UTF-16 for Windows dialog
             wchar_t wSuggested[260];
@@ -641,13 +644,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 char targetPath[512];
                 WideCharToMultiByte(CP_UTF8, 0, ofn.lpstrFile, -1, targetPath, sizeof(targetPath), NULL, NULL);
 
-                if (ExportToZip(gDataDirA, targetPath, "verifier.dat") != 0)
+                if (ExportToZip(gDataDirA, targetPath, "verifier.dat", SQL_FILE) != 0)
                 {
                      MessageBox(hwnd, L"Failed to export data.", L"Error", MB_ICONERROR);
                      return 0;
                 }
                 MessageBoxW(hwnd, L"Export complete!", L"Success", MB_ICONINFORMATION);
-            }*/
+            }
         }
         else if (LOWORD(wParam) == 3600) { // OPEN URL
             int lenUrl = GetWindowTextLengthA(hUrl) + 1;

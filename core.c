@@ -5,7 +5,6 @@
 #include <stdint.h>
 #include <assert.h>
 #include <time.h>
-#include <dirent.h>
 #include <direct.h>
 #include <errno.h>
 
@@ -25,6 +24,7 @@
 #include <sys/stat.h>
 #include <sodium.h> // libsodium
 #include <sqlite3.h>
+#include <zip.h>
 
 #include "core.h"
 
@@ -1162,93 +1162,14 @@ int IsPasswordIsSet(const char* checkFilePath) {
 }
 
 
-char* NotesNameToFileName(const char* notesName)
-{
-    size_t enc_len;
-    unsigned char* enc_buf = EncryptBuffer((const unsigned char*)notesName, strlen(notesName), &enc_len);
-    if (!enc_buf) {
-        return NULL;
-    }
-
-    size_t b64_len = sodium_base64_encoded_len(enc_len, sodium_base64_VARIANT_URLSAFE_NO_PADDING);
-
-    // +4 for ".enc" (b64_len already includes space for '\0')
-    char* fileName = (char*)calloc(b64_len + 4, 1);
-    if (!fileName) {
-        free(enc_buf);
-        return NULL;
-    }
-
-    // ✅ libsodium returns the destination pointer (fileName) or NULL on failure
-    if (sodium_bin2base64(fileName, b64_len, enc_buf, enc_len,
-                          sodium_base64_VARIANT_URLSAFE_NO_PADDING) == NULL) {
-        free(enc_buf);
-        free(fileName);
-        return NULL;
-    }
-
-    free(enc_buf);
-
-    // Append extension; buffer is big enough: (b64_len includes '\0') + 4 chars + new '\0'
-    strcat(fileName, ".enc");
-    return fileName;
-}
-
-
-char* FileNameToNotesName(const char* fileName)
-{
-    size_t fileNameLen = strlen(fileName);
-    if (fileNameLen <= 4)
-        return NULL;
-
-    size_t b64Len = fileNameLen - 4;
-
-    char* b64Part = calloc(b64Len + 1, 1);
-    if (!b64Part)
-        return NULL;
-    memcpy(b64Part, fileName, b64Len);
-    b64Part[b64Len] = '\0';
-
-    // Proper decoded buffer size
-    size_t binDataSize = (b64Len * 3) / 4 + 3;
-    unsigned char* binData = calloc(binDataSize, 1);
-    if (!binData) {
-        free(b64Part);
-        return NULL;
-    }
-
-    size_t binLen;
-    if (sodium_base642bin(
-            binData, binDataSize,
-            b64Part, strlen(b64Part),
-            NULL, &binLen, NULL,
-            sodium_base64_VARIANT_URLSAFE_NO_PADDING
-        ) != 0) // ✅ correct check
-    {
-        free(b64Part);
-        free(binData);
-        return NULL;
-    }
-    free(b64Part);
-
-    size_t plain_len;
-    unsigned char* plain = DecryptBuffer(binData, binLen, &plain_len);
-    free(binData);
-
-    if (!plain)
-        return NULL;
-
-    return (char*)plain; // caller frees
-}
-
-char* MakeZipExportFilename(void) // TODO
+char* MakeZipExportFilename(void)
 {
     uint64_t ts = (uint64_t)time(NULL);  // 64-bit timestamp
     uint32_t rnd = 0;
 
     randombytes_buf(&rnd, sizeof(rnd));
 
-    char buf[80];
+    char buf[100];
     int n = snprintf(buf, sizeof(buf), "MyPasswordVault_%llu_%u.zip",
                      (unsigned long long)ts, rnd);
     if (n < 0) return NULL;
@@ -1258,6 +1179,164 @@ char* MakeZipExportFilename(void) // TODO
 
     memcpy(out, buf, (size_t)n + 1);
     return out;
+}
+
+int ImportFromZip(const char* targetDir, const char* sourceZipFilePath)
+{
+    if (!targetDir || !sourceZipFilePath)
+        return -1;
+
+    // Try to open zip for reading
+    int err = 0;
+    zip_t* za = zip_open(sourceZipFilePath, ZIP_RDONLY, &err);
+    if (!za) {
+        zip_error_t error;
+        zip_error_init_with_code(&error, err);
+        fprintf(stderr, "Cannot open zip archive '%s': %s\n",
+                sourceZipFilePath, zip_error_strerror(&error));
+        zip_error_fini(&error);
+        return -1;
+    }
+
+    // Create output directory if it doesn’t exist
+    mkdir(targetDir);
+
+    zip_int64_t num_entries = zip_get_num_entries(za, 0);
+    for (zip_uint64_t i = 0; i < (zip_uint64_t)num_entries; i++) {
+        const char* name = zip_get_name(za, i, 0);
+        if (!name) {
+            fprintf(stderr, "Cannot get name for entry #%llu: %s\n",
+                    (unsigned long long)i, zip_strerror(za));
+            continue;
+        }
+
+        // Skip directories (entries ending with '/')
+        size_t nlen = strlen(name);
+        if (nlen == 0 || name[nlen - 1] == '/')
+            continue;
+
+        // Read file contents from zip
+        zip_file_t* zf = zip_fopen_index(za, i, 0);
+        if (!zf) {
+            fprintf(stderr, "Cannot open file '%s' in zip: %s\n",
+                    name, zip_strerror(za));
+            continue;
+        }
+
+        // Prepare output path
+        char* outPath = JoinPath(targetDir, name);
+        if (!outPath) {
+            zip_fclose(zf);
+            continue;
+        }
+
+        FILE* f = fopen(outPath, "wb");
+        if (!f) {
+            fprintf(stderr, "Cannot create output file '%s': %s\n",
+                    outPath, strerror(errno));
+            free(outPath);
+            zip_fclose(zf);
+            continue;
+        }
+
+        // Copy contents
+        char buf[8192];
+        zip_int64_t bytes_read;
+        while ((bytes_read = zip_fread(zf, buf, sizeof(buf))) > 0) {
+            fwrite(buf, 1, (size_t)bytes_read, f);
+        }
+
+        fclose(f);
+        free(outPath);
+        zip_fclose(zf);
+    }
+
+    if (zip_close(za) < 0) {
+        fprintf(stderr, "Cannot close zip archive '%s': %s\n",
+                sourceZipFilePath, zip_strerror(za));
+        return -1;
+    }
+
+    return 0;
+}
+
+int ExportToZip(const char* sourceDir, const char* targetZipFilePath, const char* checkFileName, const char* dbFileName)
+{
+    if (!sourceDir || !targetZipFilePath || !checkFileName || !dbFileName)
+        return -1;
+
+    if (!IsPasswordIsSetSplitPath(sourceDir, checkFileName))
+        return -1;
+
+    int err = 0;
+    zip_t* za = zip_open(targetZipFilePath, ZIP_CREATE | ZIP_EXCL, &err);
+    if (!za) {
+        zip_error_t error;
+        zip_error_init_with_code(&error, err);
+        fprintf(stderr, "Cannot open zip archive '%s': %s\n",
+                targetZipFilePath, zip_error_strerror(&error));
+        zip_error_fini(&error);
+        return -1;
+    }
+
+    // ---- Add verifier file ----
+    char* filePath = JoinPath(sourceDir, checkFileName);
+    if (!filePath) {
+        zip_close(za);
+        return -1;
+    }
+
+    struct zip_source* src = zip_source_file(za, filePath, 0, ZIP_LENGTH_TO_END);
+    free(filePath);
+    if (!src) {
+        fprintf(stderr, "Cannot create source for check file '%s': %s\n",
+                checkFileName, zip_strerror(za));
+        zip_close(za);
+        return -1;
+    }
+
+    if (zip_file_add(za, checkFileName, src, ZIP_FL_ENC_UTF_8) < 0) {
+        fprintf(stderr, "Cannot add check file to zip: %s\n", zip_strerror(za));
+        zip_source_free(src); // must free manually if zip_file_add fails
+        zip_close(za);
+        return -1;
+    }
+
+    // ---- Add all .sqlite file
+    DestroySQL();
+    char* dbFilePath = JoinPath(sourceDir, dbFileName);
+    if (!dbFilePath) {
+        zip_close(za);
+        InitSQL(sourceDir);
+        return -1;
+    }
+
+    src = zip_source_file(za, dbFilePath, 0, ZIP_LENGTH_TO_END);
+    free(dbFilePath);
+    if (!src) {
+        fprintf(stderr, "Cannot create source for databse file '%s': %s\n",
+                checkFileName, zip_strerror(za));
+        zip_close(za);
+        InitSQL(sourceDir);
+        return -1;
+    }
+
+    if (zip_file_add(za, dbFileName, src, ZIP_FL_ENC_UTF_8) < 0) {
+        fprintf(stderr, "Cannot add databse file to zip: %s\n", zip_strerror(za));
+        zip_source_free(src); // must free manually if zip_file_add fails
+        zip_close(za);
+        InitSQL(sourceDir);
+        return -1;
+    }
+
+    if (zip_close(za) < 0) {
+        fprintf(stderr, "Cannot close zip archive '%s': %s\n",
+                targetZipFilePath, zip_strerror(za));
+        InitSQL(sourceDir);
+        return -1;
+    }
+    InitSQL(sourceDir);
+    return 0;
 }
 
 int WipeAndResetStorage(const char* sourceDir, const char* checkFileName, const char* sqlFileName)
