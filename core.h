@@ -30,6 +30,8 @@ typedef struct NoteData {
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 #endif
 
+#define SQL_FILE "SecureStorage.sqlite"
+
 char* JoinPath(const char* saveDirPath, const char* fileName);
 
 // AES file encryption/decryption
@@ -62,6 +64,6 @@ char* GeneratePassword(void);
 char* NotesNameToFileName(const char* notesName);
 char* FileNameToNotesName(const char* fileName);
 
-char* MakeJsonExportFilename(void);
-int WipeAndResetStorage(const char* sourceDir, const char* checkFileName);
+char* MakeZipExportFilename(void);
+int WipeAndResetStorage(const char* sourceDir, const char* checkFileNamem, const char* sqlFileName);
 #endif // CORE_H

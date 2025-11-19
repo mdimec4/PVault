@@ -68,7 +68,7 @@ int Init()
 
 int InitSQL(const char* dataDir)
 {
-    char* dbPath = JoinPath(dataDir, "SecureStorage.db");
+    char* dbPath = JoinPath(dataDir, SQL_FILE);
     
     int exit = sqlite3_open(dbPath, &DB);
     free(dbPath);
@@ -1241,7 +1241,7 @@ char* FileNameToNotesName(const char* fileName)
     return (char*)plain; // caller frees
 }
 
-char* MakeJsonExportFilename(void) // TODO
+char* MakeZipExportFilename(void) // TODO
 {
     uint64_t ts = (uint64_t)time(NULL);  // 64-bit timestamp
     uint32_t rnd = 0;
@@ -1249,7 +1249,7 @@ char* MakeJsonExportFilename(void) // TODO
     randombytes_buf(&rnd, sizeof(rnd));
 
     char buf[80];
-    int n = snprintf(buf, sizeof(buf), "MyPasswordVault_%llu_%u.json",
+    int n = snprintf(buf, sizeof(buf), "MyPasswordVault_%llu_%u.zip",
                      (unsigned long long)ts, rnd);
     if (n < 0) return NULL;
 
@@ -1260,9 +1260,9 @@ char* MakeJsonExportFilename(void) // TODO
     return out;
 }
 
-int WipeAndResetStorage(const char* sourceDir, const char* checkFileName) // TODO make it delete DB file
+int WipeAndResetStorage(const char* sourceDir, const char* checkFileName, const char* sqlFileName)
 {
-    if (!sourceDir || !checkFileName)
+    if (!sourceDir || !checkFileName || !sqlFileName)
         return -1;
 
     if (!IsPasswordIsSetSplitPath(sourceDir, checkFileName))
@@ -1278,33 +1278,15 @@ int WipeAndResetStorage(const char* sourceDir, const char* checkFileName) // TOD
     if (r != 0)
         return -1;
         
-    DIR* dir = opendir(sourceDir);
-    if (!dir) {
-        fprintf(stderr, "Could not open directory '%s': %s\n",
-                sourceDir, strerror(errno));
+    char* dbFilePath = JoinPath(sourceDir, sqlFileName);
+    if (!dbFilePath) {
         return -1;
     }
     
-    struct dirent* de;
-    while ((de = readdir(dir)) != NULL) {
-        size_t len = strlen(de->d_name);
-        if (len < 4 || strcmp(de->d_name + len - 4, ".enc") != 0)
-            continue;
-
-        char* encPath = JoinPath(sourceDir, de->d_name);
-        if (!encPath)
-            continue;
-
-        r = remove(encPath);
-        free(encPath);
-        if (r != 0)
-        {
-          closedir(dir); 
-          return -1;
-        }
-    }
-
-    closedir(dir);
+    r = remove(dbFilePath);
+    free(dbFilePath);
+    if (r != 0)
+        return -1;
     
     return 0;
 }

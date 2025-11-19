@@ -437,7 +437,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             if (result != IDYES)
                 return 0;
                 
-            if (WipeAndResetStorage(gDataDirA, "verifier.dat") != 0)
+            if (WipeAndResetStorage(gDataDirA, "verifier.dat", SQL_FILE) != 0)
             {
                 MessageBox(hwnd, L"Failed to wipe existing data.", L"Error", MB_ICONERROR);
                 return 0;
