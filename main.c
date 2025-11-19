@@ -827,30 +827,42 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             // Calculate usable height for list above buttons
             int listHeight = buttonY - MARGIN - CONTROL_SPACING;   
             
-            MoveWindow(hNotesList,MARGIN, MARGIN,
-                   listWidth - MARGIN, listHeight, TRUE);
+            MoveWindow(hNotesList, MARGIN, 2* MARGIN + BUTTON_HEIGHT,
+                listWidth - MARGIN, listHeight - MARGIN - BUTTON_HEIGHT, TRUE);
+            MoveWindow(hNotesSearch, MARGIN, MARGIN,
+                listWidth - MARGIN, BUTTON_HEIGHT, TRUE);
             MoveWindow(hNewNoteButton,  MARGIN,
-                   buttonY, buttonHalfWidth, BUTTON_HEIGHT, TRUE);
+               buttonY, buttonHalfWidth, BUTTON_HEIGHT, TRUE);
             MoveWindow(hDeleteNoteButton,  MARGIN + buttonHalfWidth + CONTROL_SPACING,
-                   buttonY, buttonHalfWidth, BUTTON_HEIGHT, TRUE);
+               buttonY, buttonHalfWidth, BUTTON_HEIGHT, TRUE);
             MoveWindow(hName, listWidth + MARGIN, MARGIN,
-                   rc.right - listWidth - 2 * MARGIN,
-                   40, TRUE);
-            MoveWindow(hUserName, listWidth + MARGIN, 2 * MARGIN + 40,
-                   rc.right - listWidth - 2 * MARGIN,
-                   40, TRUE);
-            MoveWindow(hEmail, listWidth + MARGIN, 3 * MARGIN + 2 * 40,
-                   rc.right - listWidth - 2 * MARGIN,
-                   40, TRUE);
-            MoveWindow(hUrl, listWidth + MARGIN, 4 * MARGIN + 3 * 40,
-                   rc.right - listWidth - 2 * MARGIN,
-                   40, TRUE);
-            MoveWindow(hPassword, listWidth + MARGIN, 5 * MARGIN + 4 * 40,
-                   rc.right - listWidth - 2 * MARGIN,
-                   40, TRUE);
-            MoveWindow(hOtherSecret, listWidth + MARGIN, 6 * MARGIN + 5 * 40,
-                   rc.right - listWidth - 2 * MARGIN,
-                   listHeight - 5 * MARGIN - 5 * 40, TRUE);
+                rc.right - listWidth - 2 * MARGIN, BUTTON_HEIGHT, TRUE);
+            MoveWindow(hUserNameLabel, listWidth + MARGIN,
+                2 * MARGIN + BUTTON_HEIGHT, LABEL_WIDTH, BUTTON_HEIGHT, TRUE);
+            MoveWindow(hUserName, listWidth + 2* MARGIN + LABEL_WIDTH,
+                2 * MARGIN + BUTTON_HEIGHT, rc.right - listWidth - 3 * MARGIN - LABEL_WIDTH - 2 * (MARGIN + BUTTON_WIDTH), BUTTON_HEIGHT, TRUE);
+            MoveWindow(hEmailLabel, listWidth + MARGIN,
+                3 * MARGIN + 2 * BUTTON_HEIGHT, LABEL_WIDTH, BUTTON_HEIGHT, TRUE);
+            MoveWindow(hEmail, listWidth + 2* MARGIN + LABEL_WIDTH, 3 * MARGIN + 2 * BUTTON_HEIGHT,
+                rc.right - listWidth - 3 * MARGIN - LABEL_WIDTH - 2 * (MARGIN + BUTTON_WIDTH), BUTTON_HEIGHT, TRUE);
+            MoveWindow(hUrlLabel, listWidth + MARGIN, 4 * MARGIN + 3 * BUTTON_HEIGHT,
+                LABEL_WIDTH, BUTTON_HEIGHT, TRUE);
+            MoveWindow(hUrl, listWidth + 2* MARGIN + LABEL_WIDTH, 4 * MARGIN + 3 * BUTTON_HEIGHT,
+                rc.right - listWidth - 3 * MARGIN - LABEL_WIDTH - 2 * (MARGIN + BUTTON_WIDTH), BUTTON_HEIGHT, TRUE);
+            MoveWindow(hUrlOpenButton, rc.right - 2 * (MARGIN + BUTTON_WIDTH),
+                4 * MARGIN + 3 * BUTTON_HEIGHT, BUTTON_WIDTH, BUTTON_HEIGHT, TRUE);
+            MoveWindow(hPasswordVaultLabel, listWidth + MARGIN, 5 * MARGIN + 4 * BUTTON_HEIGHT,
+                LABEL_WIDTH, BUTTON_HEIGHT, TRUE);
+            MoveWindow(hPassword, listWidth + 2* MARGIN + LABEL_WIDTH, 5 * MARGIN + 4 * BUTTON_HEIGHT,
+                rc.right - listWidth - 3 * MARGIN - LABEL_WIDTH - 2 * (MARGIN + BUTTON_WIDTH), BUTTON_HEIGHT, TRUE);
+            MoveWindow(hPasswordCopyButton, rc.right - 2 * (MARGIN + BUTTON_WIDTH), 5 * MARGIN + 4 * BUTTON_HEIGHT,
+                BUTTON_WIDTH, BUTTON_HEIGHT, TRUE);
+            MoveWindow(hPasswordGenerateButton, rc.right - MARGIN - BUTTON_WIDTH, 5 * MARGIN + 4 * BUTTON_HEIGHT,
+                BUTTON_WIDTH, BUTTON_HEIGHT, TRUE);
+            MoveWindow(hOtherSecretLabel, listWidth + MARGIN, 6 * MARGIN + 5 * BUTTON_HEIGHT,
+                LABEL_WIDTH, BUTTON_HEIGHT, TRUE);
+            MoveWindow(hOtherSecret, listWidth + 2* MARGIN + LABEL_WIDTH, 6 * MARGIN + 5 * BUTTON_HEIGHT,
+                rc.right - listWidth - 3 * MARGIN - LABEL_WIDTH - 2 * (MARGIN + BUTTON_WIDTH), listHeight - 5 * MARGIN - 5 * BUTTON_HEIGHT, TRUE);
             MoveWindow(hExportButton, rc.right - 2 * MARGIN - BUTTON_WIDTH * 2 - CONTROL_SPACING,
                    buttonY, BUTTON_WIDTH, BUTTON_HEIGHT, TRUE);
             MoveWindow(hLogoutButton,  rc.right - MARGIN - BUTTON_WIDTH,
@@ -1228,7 +1240,7 @@ void ShowEditorUI(HWND hwnd)
     hPasswordCopyButton = CreateWindow(
         L"BUTTON", L"Copy pasword",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-         rc.right - 2 * (MARGIN + BUTTON_WIDTH), 5 * MARGIN + 4 * BUTTON_HEIGHT, BUTTON_WIDTH, BUTTON_HEIGHT,
+        rc.right - 2 * (MARGIN + BUTTON_WIDTH), 5 * MARGIN + 4 * BUTTON_HEIGHT, BUTTON_WIDTH, BUTTON_HEIGHT,
         hwnd, (HMENU)3601, NULL, NULL);
     SetWindowTheme(hPasswordCopyButton, L"", L"");
     ApplyModernButton(hPasswordCopyButton);
@@ -1236,7 +1248,7 @@ void ShowEditorUI(HWND hwnd)
     hPasswordGenerateButton = CreateWindow(
         L"BUTTON", L"Generate pasword",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-         rc.right - MARGIN - BUTTON_WIDTH, 5 * MARGIN + 4 * BUTTON_HEIGHT, BUTTON_WIDTH, BUTTON_HEIGHT,
+        rc.right - MARGIN - BUTTON_WIDTH, 5 * MARGIN + 4 * BUTTON_HEIGHT, BUTTON_WIDTH, BUTTON_HEIGHT,
         hwnd, (HMENU)3602, NULL, NULL);
     SetWindowTheme(hPasswordGenerateButton, L"", L"");
     ApplyModernButton(hPasswordGenerateButton);
@@ -1254,7 +1266,7 @@ void ShowEditorUI(HWND hwnd)
         0, MSFTEDIT_CLASS, L"",
         WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL |
         ES_MULTILINE | ES_AUTOVSCROLL | ES_AUTOHSCROLL,
-        listWidth + 2* MARGIN + LABEL_WIDTH, 6 * MARGIN + 5 * BUTTON_HEIGHT,rc.right - listWidth - 3 * MARGIN - LABEL_WIDTH - 2 * (MARGIN + BUTTON_WIDTH), listHeight - 5 * MARGIN - 5 * BUTTON_HEIGHT,
+        listWidth + 2* MARGIN + LABEL_WIDTH, 6 * MARGIN + 5 * BUTTON_HEIGHT, rc.right - listWidth - 3 * MARGIN - LABEL_WIDTH - 2 * (MARGIN + BUTTON_WIDTH), listHeight - 5 * MARGIN - 5 * BUTTON_HEIGHT,
         hwnd, (HMENU)2500, NULL, NULL);
     SetWindowTheme(hOtherSecret, L"", L"");
     SendMessage(hOtherSecret, WM_SETFONT, (WPARAM)hFont, TRUE);
