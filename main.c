@@ -74,7 +74,7 @@ BOOL isUnlocked = FALSE;
 static BOOL gShowingLogoutMsg = FALSE;
 static BOOL gInLogout = FALSE;
 
-HWND hNotesList, hNewNoteButton, hDeleteNoteButton;
+HWND hNotesList, hNotesSearch, hNewNoteButton, hDeleteNoteButton;
 const int listWidth = 200;
 
 HWND hExportButton;
@@ -97,13 +97,23 @@ static void NotesList_FreeAll(void)
     gNotes = NULL;
 }
 
-static void NotesList_LoadFromDb(HWND hNotesList)
+static void NotesList_LoadFromDb(void)
 {
 
-    NotesList_FreeAll();
     SendMessageW(hNotesList, LB_RESETCONTENT, 0, 0);
-
-    gNotes = LoadNotesList(NULL);
+    NotesList_FreeAll();
+    
+    char* filter = NULL;
+    int searchLen = GetWindowTextLengthA(hNotesSearch);
+    if (searchLen > 0)
+    {
+        filter = calloc(searchLen + 1, 1);
+        GetWindowTextA(hNotesSearch, filter, searchLen + 1);
+    }
+    
+    gNotes = LoadNotesList(filter);
+    if (filter) free(filter);
+    
     for (md_linked_list_el* el = gNotes; el; el = el->next) {
         NoteEntry* n = (NoteEntry* )el->data;
 
@@ -661,6 +671,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             SaveEncryptedText();
             gTextChanged = FALSE;
         }
+        else if ((HWND)lParam == hNotesSearch && HIWORD(wParam) == EN_CHANGE)
+        {
+            NotesList_LoadFromDb();
+        }
         else if (HIWORD(wParam) == EN_CHANGE && ((HWND)lParam == hUserName || (HWND)lParam == hEmail || (HWND)lParam == hUrl || (HWND)lParam == hPassword || (HWND)lParam == hOtherSecret)) {
             gTextChanged = TRUE;
             ResetInactivityTimer(hwnd); // <--- reset timer on text change
@@ -1108,9 +1122,16 @@ void ShowEditorUI(HWND hwnd)
     hNotesList = CreateWindowEx(
         0, L"LISTBOX", NULL,
         WS_CHILD | WS_VISIBLE | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL,
-        MARGIN, MARGIN, listWidth - MARGIN, listHeight,
+        MARGIN, 2* MARGIN + BUTTON_HEIGHT, listWidth - MARGIN, listHeight - MARGIN - BUTTON_HEIGHT,
         hwnd, (HMENU)3000, NULL, NULL);
     SetWindowTheme(hNotesList, L"", L"");
+    
+    hNotesSearch = CreateWindowEx(0, L"EDIT", L"",
+        WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | WS_TABSTOP,
+        MARGIN, MARGIN, listWidth - MARGIN, BUTTON_HEIGHT,
+        hwnd, (HMENU)2100, NULL, NULL);
+    SetWindowTheme(hNotesSearch, L"", L"");
+    SendMessage(hNotesSearch, WM_SETFONT, (WPARAM)hFont, TRUE);
         
     hNewNoteButton = CreateWindow(
         L"BUTTON", L"New",
@@ -1241,14 +1262,16 @@ void ShowEditorUI(HWND hwnd)
     
         
     // Subscribe to EN_CHANGE notifications
+    SendMessage(hNotesSearch, EM_SETEVENTMASK, 0, ENM_CHANGE | ENM_UPDATE);
     SendMessage(hUserName, EM_SETEVENTMASK, 0, ENM_CHANGE | ENM_UPDATE);
     SendMessage(hEmail, EM_SETEVENTMASK, 0, ENM_CHANGE | ENM_UPDATE);
     SendMessage(hUrl, EM_SETEVENTMASK, 0, ENM_CHANGE | ENM_UPDATE);
     SendMessage(hPassword, EM_SETEVENTMASK, 0, ENM_CHANGE | ENM_UPDATE);
     SendMessage(hOtherSecret, EM_SETEVENTMASK, 0, ENM_CHANGE | ENM_UPDATE);
     
-    NotesList_LoadFromDb(hNotesList);
+    NotesList_LoadFromDb();
     
+    EnableWindow(hNotesSearch, TRUE);
     EnableWindow(hName, FALSE);
     EnableWindow(hUserName, FALSE);
     EnableWindow(hEmail, FALSE);
@@ -1368,7 +1391,12 @@ void DestroyEditorUI(HWND hwnd)
         DestroyWindow(hLogoutButton);
         hLogoutButton = NULL;
     }
-
+    
+    if (hNotesSearch && IsWindow(hNotesSearch)) {
+        DestroyWindow(hNotesSearch);
+        hNotesSearch = NULL;
+    }
+    
     if (hNotesList && IsWindow(hNotesList)) {
         DestroyWindow(hNotesList);
         hNotesList = NULL;

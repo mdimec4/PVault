@@ -184,7 +184,8 @@ md_linked_list_el* LoadNotesList(const char* filter)
     if (filter) {
         size_t newSize = strlen(filter) + 2 + 1;
         parameter = calloc(newSize, 1);
-        snprintf(parameter, newSize - 1, "%%%s%%", filter);
+        snprintf(parameter, newSize, "%%%s%%", filter);
+        printf("search param: '%s'\n", parameter);
         query = "SELECT ID, NAME FROM SECRETS WHERE NAME LIKE ? ORDER BY ID DESC;";
     }
     
