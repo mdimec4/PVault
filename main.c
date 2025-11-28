@@ -189,7 +189,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     HWND hwnd = CreateWindowEx(
         0, CLASS_NAME, L"MyPasswordVault",
         WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, 2048, 1024,
+        CW_USEDEFAULT, CW_USEDEFAULT, 1024, 768,
         NULL, NULL, hInstance, NULL);
 
     if (!hwnd)

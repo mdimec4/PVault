@@ -9,7 +9,7 @@
   <Identity
     Name="MDTools.MyPasswordVault"
     Publisher="CN=BC8DD125-A1B5-4A04-A8E3-26028FF73E40"
-    Version="1.0.2.0" />
+    Version="1.0.3.0" />
 
   <Properties>
     <DisplayName>MyPasswordVault</DisplayName>
